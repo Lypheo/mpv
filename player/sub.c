@@ -52,14 +52,14 @@ static void reset_subtitles(struct MPContext *mpctx, struct track *track)
         sub_reset(track->d_sub);
         sub_set_play_dir(track->d_sub, mpctx->play_dir);
     }
-    term_osd_set_subs(mpctx, NULL);
+    term_osd_set_subs(mpctx, NULL, 0);
 }
 
 void reset_subtitle_state(struct MPContext *mpctx)
 {
     for (int n = 0; n < mpctx->num_tracks; n++)
         reset_subtitles(mpctx, mpctx->tracks[n]);
-    term_osd_set_subs(mpctx, NULL);
+    term_osd_set_subs(mpctx, NULL, 0);
 }
 
 void uninit_sub(struct MPContext *mpctx, struct track *track)
@@ -105,10 +105,12 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
         return false;
 
     // Handle displaying subtitles on terminal; never done for secondary subs
-    if (mpctx->current_track[0][STREAM_SUB] == track && !mpctx->video_out) {
-        char *text = sub_get_text(dec_sub, video_pts, SD_TEXT_TYPE_PLAIN);
-        term_osd_set_subs(mpctx, text);
-        talloc_free(text);
+    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++) {
+        if (mpctx->current_track[n][STREAM_SUB] == track && !mpctx->video_out) {
+            char *text = sub_get_text(dec_sub, video_pts, SD_TEXT_TYPE_PLAIN);
+            term_osd_set_subs(mpctx, text, n);
+            talloc_free(text);
+        }
     }
 
     // Handle displaying subtitles on VO with no video being played. This is

@@ -71,13 +71,15 @@ static char *join_lines(void *ta_ctx, char **parts, int num_parts)
 static void term_osd_update(struct MPContext *mpctx)
 {
     int num_parts = 0;
-    char *parts[3] = {0};
+    char *parts[2 + MAX_PTRACKS] = {0};
 
     if (!mpctx->opts->use_terminal)
         return;
 
-    if (mpctx->term_osd_subs && mpctx->term_osd_subs[0])
-        parts[num_parts++] = mpctx->term_osd_subs;
+    for (int i = 0; i < num_ptracks[STREAM_SUB]; ++i) 
+        if (mpctx->term_osd_subs[i] && mpctx->term_osd_subs[i][0])
+            parts[num_parts++] = mpctx->term_osd_subs[i];
+
     if (mpctx->term_osd_text && mpctx->term_osd_text[0])
         parts[num_parts++] = mpctx->term_osd_text;
     if (mpctx->term_osd_status && mpctx->term_osd_status[0])
@@ -111,14 +113,14 @@ static void term_osd_update_title(struct MPContext *mpctx)
     mpctx->term_osd_title = talloc_steal(mpctx, s);
 }
 
-void term_osd_set_subs(struct MPContext *mpctx, const char *text)
+void term_osd_set_subs(struct MPContext *mpctx, const char *text, int order)
 {
     if (mpctx->video_out || !text || !mpctx->opts->subs_rend->sub_visibility)
         text = ""; // disable
-    if (strcmp(mpctx->term_osd_subs ? mpctx->term_osd_subs : "", text) == 0)
+    if (strcmp(mpctx->term_osd_subs[order] ? mpctx->term_osd_subs[order] : "", text) == 0)
         return;
-    talloc_free(mpctx->term_osd_subs);
-    mpctx->term_osd_subs = talloc_strdup(mpctx, text);
+    talloc_free(mpctx->term_osd_subs[order]);
+    mpctx->term_osd_subs[order] = talloc_strdup(mpctx, text);
     term_osd_update(mpctx);
 }
 
