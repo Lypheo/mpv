@@ -162,6 +162,12 @@ main_dependencies = [
         'desc': 'Android environment',
         'func': check_statement('android/api-level.h', '(void)__ANDROID__'),  # arbitrary android-specific header
     }, {
+        'name': '--android-media-ndk',
+        'desc': 'Android Media APIs',
+        'deps': 'android',
+        # header only, library is dynamically loaded
+        'func': check_statement('media/NdkImageReader.h', 'int x = AIMAGE_FORMAT_PRIVATE'),
+    }, {
         'name': '--tvos',
         'desc': 'tvOS environment',
         'func': check_statement(
@@ -406,12 +412,12 @@ libav_dependencies = [
     {
         'name': 'ffmpeg',
         'desc': 'FFmpeg library',
-        'func': check_pkg_config('libavutil',     '>= 56.12.100',
-                                 'libavcodec',    '>= 58.16.100',
-                                 'libavformat',   '>= 58.9.100',
-                                 'libswscale',    '>= 5.0.101',
-                                 'libavfilter',   '>= 7.14.100',
-                                 'libswresample', '>= 3.0.100'),
+        'func': check_pkg_config('libavutil',     '>= 56.70.100',
+                                 'libavcodec',    '>= 58.134.100',
+                                 'libavformat',   '>= 58.76.100',
+                                 'libswscale',    '>= 5.9.100',
+                                 'libavfilter',   '>= 7.110.100',
+                                 'libswresample', '>= 3.9.100'),
         'req': True,
         'fmsg': "Unable to find development files for some of the required \
 FFmpeg libraries. Git master is recommended."
@@ -422,7 +428,7 @@ FFmpeg libraries. Git master is recommended."
     }, {
         'name': '--libavdevice',
         'desc': 'libavdevice',
-        'func': check_pkg_config('libavdevice', '>= 57.0.0'),
+        'func': check_pkg_config('libavdevice', '>= 58.13.100'),
     }
 ]
 
@@ -440,7 +446,7 @@ audio_output_features = [
     }, {
         'name': '--pipewire',
         'desc': 'PipeWire audio output',
-        'func': check_pkg_config('libpipewire-0.3', '>= 0.3.0')
+        'func': check_pkg_config('libpipewire-0.3', '>= 0.3.19')
     }, {
         'name': '--sndio',
         'desc': 'sndio audio input/output',
@@ -510,11 +516,11 @@ video_output_features = [
         'deps': 'gbm.h',
         'func': check_pkg_config('gbm', '>= 17.1.0'),
     } , {
-        'name': '--wayland-scanner',
+        'name': 'wayland-scanner',
         'desc': 'wayland-scanner',
         'func': check_program('wayland-scanner', 'WAYSCAN')
     } , {
-        'name': '--wayland-protocols',
+        'name': 'wayland-protocols',
         'desc': 'wayland-protocols',
         'func': check_wl_protocols
     } , {
@@ -524,6 +530,16 @@ video_output_features = [
         'func': check_pkg_config('wayland-client', '>= 1.15.0',
                                  'wayland-cursor', '>= 1.15.0',
                                  'xkbcommon',      '>= 0.3.0'),
+    } , {
+        'name': 'wayland-protocols-1-24',
+        'desc': 'wayland-protocols version 1.24+',
+        'deps': 'wayland',
+        'func': check_pkg_config('wayland-protocols >= 1.24'),
+    } , {
+        'name': 'wayland-protocols-1-27',
+        'desc': 'wayland-protocols version 1.27+',
+        'deps': 'wayland',
+        'func': check_pkg_config('wayland-protocols >= 1.27'),
     } , {
         'name': 'memfd_create',
         'desc': "Linux's memfd_create()",
@@ -659,9 +675,9 @@ video_output_features = [
         'deps': 'vaapi && gl-wayland',
         'func': check_pkg_config('libva-wayland', '>= 1.1.0'),
     }, {
-        'name': 'vaapi-wayland-memfd',
-        'desc': 'VAAPI (Wayland dmabuf support)',
-        'deps': 'vaapi-wayland && memfd_create',
+        'name': 'dmabuf-wayland',
+        'desc': 'Wayland dmabuf support',
+        'deps': 'wayland && memfd_create && (vaapi-wayland || drm)',
         'func': check_true,
     }, {
         'name': '--vaapi-drm',

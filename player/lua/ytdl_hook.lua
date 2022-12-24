@@ -193,11 +193,8 @@ end
 local function is_blacklisted(url)
     if o.exclude == "" then return false end
     if #ytdl.blacklisted == 0 then
-        local joined = o.exclude
-        while joined:match('%|?[^|]+') do
-            local _, e, substring = joined:find('%|?([^|]+)')
-            table.insert(ytdl.blacklisted, substring)
-            joined = joined:sub(e+1)
+        for match in o.exclude:gmatch('%|?([^|]+)') do
+            ytdl.blacklisted[#ytdl.blacklisted + 1] = match
         end
     end
     if #ytdl.blacklisted > 0 then
@@ -412,7 +409,13 @@ local function formats_to_edl(json, formats, use_all_formats)
 
     local has_requested_video = false
     local has_requested_audio = false
-    for index, track in ipairs(formats) do
+    -- Web players with quality selection always show the highest quality
+    -- option at the top. Since tracks are usually listed with the first
+    -- track at the top, that should also be the highest quality track.
+    -- yt-dlp/youtube-dl sorts it's formats from worst to best.
+    -- Iterate in reverse to get best track first.
+    for index = #formats, 1, -1 do
+        local track = formats[index]
         local edl_track = nil
         edl_track = edl_track_joined(track.fragments,
             track.protocol, json.is_live,
@@ -661,7 +664,8 @@ local function add_single_video(json)
                     edl = edl .. ",codec=" .. codec
                 end
                 edl = edl .. ";" .. edl_escape(sub)
-                mp.commandv("sub-add", edl, "auto", sub_info.ext, lang)
+                local title = sub_info.name or sub_info.ext
+                mp.commandv("sub-add", edl, "auto", title, lang)
             else
                 msg.verbose("No subtitle data/url for ["..lang.."]")
             end

@@ -122,6 +122,7 @@ local state = {
     enabled = true,
     input_enabled = true,
     showhide_enabled = false,
+    windowcontrols_buttons = false,
     dmx_cache = 0,
     using_video_margins = false,
     border = true,
@@ -2409,9 +2410,14 @@ function render()
         for _,cords in ipairs(osc_param.areas["window-controls"]) do
             if state.osc_visible then -- activate only when OSC is actually visible
                 set_virt_mouse_area(cords.x1, cords.y1, cords.x2, cords.y2, "window-controls")
-                mp.enable_key_bindings("window-controls")
-            else
-                mp.disable_key_bindings("window-controls")
+            end
+            if state.osc_visible ~= state.windowcontrols_buttons then
+                if state.osc_visible then
+                    mp.enable_key_bindings("window-controls")
+                else
+                    mp.disable_key_bindings("window-controls")
+                end
+                state.windowcontrols_buttons = state.osc_visible
             end
 
             if (mouse_hit_coords(cords.x1, cords.y1, cords.x2, cords.y2)) then
@@ -2585,7 +2591,11 @@ function tick()
 
         -- render idle message
         msg.trace("idle message")
-        local icon_x, icon_y = 320 - 26, 140
+        local _, _, display_aspect = mp.get_osd_size()
+        local display_h = 360
+        local display_w = display_h * display_aspect
+        -- logo is rendered at 2^(6-1) = 32 times resolution with size 1800x1800
+        local icon_x, icon_y = (display_w - 1800 / 32) / 2, 140
         local line_prefix = ("{\\rDefault\\an7\\1a&H00&\\bord0\\shad0\\pos(%f,%f)}"):format(icon_x, icon_y)
 
         local ass = assdraw.ass_new()
@@ -2607,11 +2617,11 @@ function tick()
 
         if user_opts.idlescreen then
             ass:new_event()
-            ass:pos(320, icon_y+65)
+            ass:pos(display_w / 2, icon_y + 65)
             ass:an(8)
             ass:append("Drop files or URLs to play here.")
         end
-        set_osd(640, 360, ass.text)
+        set_osd(display_w, display_h, ass.text)
 
         if state.showhide_enabled then
             mp.disable_key_bindings("showhide")

@@ -62,11 +62,12 @@ extern const struct vo_driver video_out_drm;
 extern const struct vo_driver video_out_direct3d;
 extern const struct vo_driver video_out_sdl;
 extern const struct vo_driver video_out_vaapi;
-extern const struct vo_driver video_out_vaapi_wayland;
+extern const struct vo_driver video_out_dmabuf_wayland;
 extern const struct vo_driver video_out_wlshm;
 extern const struct vo_driver video_out_rpi;
 extern const struct vo_driver video_out_tct;
 extern const struct vo_driver video_out_sixel;
+extern const struct vo_driver video_out_kitty;
 
 const struct vo_driver *const video_out_drivers[] =
 {
@@ -93,8 +94,8 @@ const struct vo_driver *const video_out_drivers[] =
 #if HAVE_SDL2_VIDEO
     &video_out_sdl,
 #endif
-#if HAVE_VAAPI_WAYLAND && HAVE_MEMFD_CREATE
-    &video_out_vaapi_wayland,
+#if HAVE_DMABUF_WAYLAND
+    &video_out_dmabuf_wayland,
 #endif
 #if HAVE_VAAPI_X11 && HAVE_GPL
     &video_out_vaapi,
@@ -118,6 +119,7 @@ const struct vo_driver *const video_out_drivers[] =
 #if HAVE_SIXEL
     &video_out_sixel,
 #endif
+    &video_out_kitty,
     &video_out_lavc,
     NULL
 };

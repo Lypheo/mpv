@@ -1249,7 +1249,7 @@ Video
     :videotoolbox: requires ``--vo=gpu`` (macOS 10.8 and up),
                    or ``--vo=libmpv`` (iOS 9.0 and up)
     :videotoolbox-copy: copies video back into system RAM (macOS 10.8 or iOS 9.0 and up)
-    :vaapi:     requires ``--vo=gpu``, ``--vo=vaapi`` or ``--vo=vaapi-wayland`` (Linux only)
+    :vaapi:     requires ``--vo=gpu``, ``--vo=vaapi`` or ``--vo=dmabuf-wayland`` (Linux only)
     :vaapi-copy: copies video back into system RAM (Linux with some GPUs only)
     :nvdec:     requires ``--vo=gpu`` (Any platform CUDA is available)
     :nvdec-copy: copies video back to system RAM (Any platform CUDA is available)
@@ -1264,7 +1264,8 @@ Video
     :dxva2-copy: copies video back to system RAM (Windows only)
     :vdpau:     requires ``--vo=gpu`` with X11, or ``--vo=vdpau`` (Linux only)
     :vdpau-copy: copies video back into system RAM (Linux with some GPUs only)
-    :mediacodec: requires ``--vo=mediacodec_embed`` (Android only)
+    :mediacodec: requires ``--vo=gpu --gpu-context=android``
+                 or ``--vo=mediacodec_embed`` (Android only)
     :mediacodec-copy: copies video back to system RAM (Android only)
     :mmal:      requires ``--vo=gpu`` (Raspberry Pi only - default if available)
     :mmal-copy: copies video back to system RAM (Raspberry Pi only)
@@ -1363,6 +1364,11 @@ Video
 
         ``rpi`` always uses the hardware overlay renderer, even with
         ``--vo=gpu``.
+
+        ``mediacodec`` is not safe. It forces RGB conversion (not with ``-copy``)
+        and how well it handles non-standard colorspaces is not known.
+        In the rare cases where 10-bit is supported the bit depth of the output
+        will be reduced to 8.
 
         ``cuda`` should usually be safe, but depending on how a file/stream
         has been mixed, it has been reported to corrupt the timestamps causing
@@ -1710,7 +1716,7 @@ Video
 ``--vd-lavc-bitexact``
     Only use bit-exact algorithms in all decoding steps (for codec testing).
 
-``--vd-lavc-fast`` (MPEG-2, MPEG-4, and H.264 only)
+``--vd-lavc-fast`` (MPEG-1/2 and H.264 only)
     Enable optimizations which do not comply with the format specification and
     potentially cause problems, like simpler dequantization, simpler motion
     compensation, assuming use of the default quantization matrix, assuming YUV
@@ -1736,12 +1742,14 @@ Video
     no, libavcodec won't output frames that were either decoded before an
     initial keyframe was decoded, or frames that are recognized as corrupted.
 
-``--vd-lavc-skiploopfilter=<skipvalue> (H.264 only)``
-    Skips the loop filter (AKA deblocking) during H.264 decoding. Since
+``--vd-lavc-skiploopfilter=<skipvalue>`` (H.264, HEVC only)
+    Skips the loop filter (AKA deblocking) during decoding. Since
     the filtered frame is supposed to be used as reference for decoding
     dependent frames, this has a worse effect on quality than not doing
     deblocking on e.g. MPEG-2 video. But at least for high bitrate HDTV,
     this provides a big speedup with little visible quality loss.
+    Codecs other than H.264 or HEVC may have partial support for this option
+    (often only ``all`` and ``none``).
 
     ``<skipvalue>`` can be one of the following:
 
@@ -1753,7 +1761,7 @@ Video
     :nonkey:  Skip all frames except keyframes.
     :all:     Skip all frames.
 
-``--vd-lavc-skipidct=<skipvalue> (MPEG-1/2 only)``
+``--vd-lavc-skipidct=<skipvalue>`` (MPEG-1/2/4 only)
     Skips the IDCT step. This degrades quality a lot in almost all cases
     (see skiploopfilter for available skip values).
 
@@ -1776,7 +1784,7 @@ Video
     Normally, this is autodetected by libavcodec. But if the bitstream contains
     no x264 version info (or it was somehow skipped), and the stream was in fact
     encoded by an old x264 version (build 150 or earlier), and if the stream
-    uses ``4:4:4`` chroma, then libavcodec will by default show corrupted video.
+    uses 4:4:4 chroma, then libavcodec will by default show corrupted video.
     This option sets the libavcodec ``x264_build`` option to ``150``, which
     means that if the stream contains no version info, or was not encoded by
     x264 at all, it assumes it was encoded by the old version. Enabling this
@@ -2020,9 +2028,9 @@ Audio
 
         Using this mode is recommended for direct hardware output, especially
         over HDMI (see HDMI warning below).
-    - ``--audio-channels=stereo``
-        Force  a plain stereo downmix. This is a special-case of the previous
-        item. (See paragraphs below for implications.)
+    - ``--audio-channels=<stereo|mono>``
+        Force a downmix to stereo or mono. These are special-cases of the
+        previous item. (See paragraphs below for implications.)
 
     If a list of layouts is given, each item can be either an explicit channel
     layout name (like ``5.1``), or a channel number. Channel numbers refer to
@@ -2956,7 +2964,7 @@ Window
 
 ``--keep-open=<yes|no|always>``
     Do not terminate when playing or seeking beyond the end of the file, and
-    there is not next file to be played (and ``--loop`` is not used).
+    there is no next file to be played (and ``--loop`` is not used).
     Instead, pause the player. When trying to seek beyond end of the file, the
     player will attempt to seek to the last frame.
 
@@ -3235,6 +3243,12 @@ Window
     depending on GPU drivers and hardware. For other VOs, this just makes
     rendering slower.
 
+``--force-render``
+    Forces mpv to always render frames regardless of the visibility of the
+    window. Currently only affects X11 and Wayland VOs since they are the
+    only ones that have this optimization (i.e. everything else always renders
+    regardless of visibility).
+
 ``--force-window-position``
     Forcefully move mpv's video output window to default location whenever
     there is a change in video parameters, video stream or file. This used to
@@ -3315,7 +3329,7 @@ Window
     On Android, the ID is interpreted as ``android.view.Surface``. Pass it as a
     value cast to ``intptr_t``. Use with ``--vo=mediacodec_embed`` and
     ``--hwdec=mediacodec`` for direct rendering using MediaCodec, or with
-    ``--vo=gpu --gpu-context=android`` (with or without ``--hwdec=mediacodec-copy``).
+    ``--vo=gpu --gpu-context=android`` (with or without ``--hwdec=mediacodec``).
 
 ``--no-window-dragging``
     Don't move the window when clicking on it and moving the mouse pointer.
@@ -5326,7 +5340,7 @@ them.
     cropping and video placement, which always invalidate the cache. Enabling
     this option makes dynamic updates of renderer settings slightly smoother at
     the cost of slightly higher latency in response to such changes. Defaults
-    to on. (Only affects ``--vo=gpu-next``, note that ``-vo=gpu`` always
+    to on. (Only affects ``--vo=gpu-next``, note that ``--vo=gpu`` always
     invalidates interpolated frames)
 
 ``--opengl-pbo``
@@ -5463,11 +5477,6 @@ them.
     use of compute shaders over fragment shaders wherever possible. Enabled by
     default, although Nvidia users may want to disable it.
 
-``--vulkan-disable-events``
-    Disable the use of VkEvents, for debugging purposes or for compatibility
-    with some older drivers / vulkan portability layers that don't provide
-    working VkEvent support.
-
 ``--vulkan-display-display=<n>``
     The index of the display, on the selected Vulkan device, to present on when
     using the ``displayvk`` GPU context. Use ``--vulkan-display-display=help``
@@ -5577,6 +5586,12 @@ them.
     just prevents the mpv window from being larger than the size of the monitor when
     it first renders. This option will take precedence over any ``autofit`` or
     ``geometry`` type settings if the configure bounds are used.
+
+``--wayland-content-type=<auto|none|photo|video|game>``
+    If supported by the compositor, mpv will send a hint using the content-type
+    protocol telling the compositor what type of content is being displayed. ``auto``
+    (default) will automatically switch between telling the compositor the content
+    is a photo, video or possibly none depending on internal heuristics.
 
 ``--wayland-disable-vsync=<yes|no>``
     Disable mpv's internal vsync for Wayland-based video output (default: no).
@@ -5853,6 +5868,13 @@ them.
 
 ``--glsl-shader=<file>``
     CLI/config file only alias for ``--glsl-shaders-append``.
+
+``--glsl-shader-opts=param1=value1,param2=value2,...``
+    Specifies the options to use for tunable shader parameters. You can target
+    specific named shaders by prefixing the shader name with a ``/``, e.g.
+    ``shader/param=value``. Without a prefix, parameters affect all shaders.
+    The shader name is the base part of the shader filename, without the
+    extension. (``--vo=gpu-next`` only)
 
 ``--deband``
     Enable the debanding algorithm. This greatly reduces the amount of visible
@@ -6186,25 +6208,13 @@ them.
     other ways (like with the ``--gamma`` option or key bindings and the
     ``gamma`` property), the value is multiplied with the other gamma value.
 
-    Recommended values based on the environmental brightness:
-
-    1.0
-        Pitch black or dimly lit room (default)
-    1.1
-        Moderately lit room, home
-    1.2
-        Brightly illuminated room, office
-
-    NOTE: This is based around the assumptions of typical movie content, which
-    contains an implicit end-to-end of about 0.8 from scene to display. For
-    bright environments it can be useful to cancel that out.
+    This option is deprecated and may be removed in the future.
 
 ``--gamma-auto``
     Automatically corrects the gamma value depending on ambient lighting
     conditions (adding a gamma boost for bright rooms).
 
-    With ambient illuminance of 16 lux, mpv will pick the 1.0 gamma value (no
-    boost), and slightly increase the boost up until 1.2 for 256 lux.
+    This option is deprecated and may be removed in the future.
 
     NOTE: Only implemented on macOS.
 
@@ -6421,6 +6431,10 @@ them.
         Specifies the local contrast coefficient at the display peak. Defaults
         to 0.5, which means that in-gamut values will be about half as bright
         as when clipping.
+    bt.2390
+        Specifies the offset for the knee point. Defaults to 1.0, which is
+        higher than the value from the original ITU-R specification (0.5).
+        (``--vo=gpu-next`` only)
     gamma
         Specifies the exponent of the function. Defaults to 1.8.
     linear
@@ -6443,7 +6457,7 @@ them.
     allows no additional brightness boost. A value of 2.0 would allow
     over-exposing by a factor of 2, and so on. Raising this setting can help
     reveal details that would otherwise be hidden in dark scenes, but raising
-    it too high will make dark scenes appear unnaturally bright. (``-vo=gpu``
+    it too high will make dark scenes appear unnaturally bright. (``--vo=gpu``
     only)
 
 ``--tone-mapping-mode``
@@ -7008,7 +7022,7 @@ Miscellaneous
     that are unavailable to outside users.
 
     This replaces ``--record-file``. It is similar to the ancient/removed
-    ``--stream-capture``/``-capture`` options, and provides better behavior in
+    ``--stream-capture``/``--capture`` options, and provides better behavior in
     most cases (i.e. actually works).
 
 ``--lavfi-complex=<string>``

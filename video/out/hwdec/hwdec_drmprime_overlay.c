@@ -26,7 +26,6 @@
 #include <libavutil/hwcontext.h>
 #include <libavutil/hwcontext_drm.h>
 
-#include "common.h"
 #include "video/hwdec.h"
 #include "common/msg.h"
 #include "options/m_config.h"
@@ -298,6 +297,7 @@ static int init(struct ra_hwdec *hw)
 
     p->hwctx = (struct mp_hwdec_ctx) {
         .driver_name = hw->driver->name,
+        .hw_imgfmt = IMGFMT_DRMPRIME,
     };
     if (!av_hwdevice_ctx_create(&p->hwctx.av_device_ref, AV_HWDEVICE_TYPE_DRM,
                                 drmGetDeviceNameFromFd2(p->ctx->fd), NULL, 0)) {
@@ -311,8 +311,8 @@ err:
     return -1;
 }
 
-const struct ra_hwdec_driver ra_hwdec_drmprime_drm = {
-    .name = "drmprime-drm",
+const struct ra_hwdec_driver ra_hwdec_drmprime_overlay = {
+    .name = "drmprime-overlay",
     .priv_size = sizeof(struct priv),
     .imgfmts = {IMGFMT_DRMPRIME, 0},
     .init = init,

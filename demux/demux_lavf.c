@@ -36,9 +36,7 @@
 #include <libavutil/display.h>
 #include <libavutil/opt.h>
 
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(56, 43, 100)
 #include <libavutil/dovi_meta.h>
-#endif
 
 #include "audio/chmap_avchannel.h"
 
@@ -647,6 +645,18 @@ static int dict_get_decimal(AVDictionary *dict, const char *entry, int def)
     return def;
 }
 
+static bool is_image(AVStream *st, bool attached_picture, const AVInputFormat *avif)
+{
+    return st->nb_frames <= 1 && (
+        attached_picture ||
+        bstr_endswith0(bstr0(avif->name), "_pipe") ||
+        strcmp(avif->name, "alias_pix") == 0 ||
+        strcmp(avif->name, "gif") == 0 ||
+        strcmp(avif->name, "image2pipe") == 0 ||
+        (st->codecpar->codec_id == AV_CODEC_ID_AV1 && st->nb_frames == 1)
+    );
+}
+
 static void handle_new_stream(demuxer_t *demuxer, int i)
 {
     lavf_priv_t *priv = demuxer->priv;
@@ -718,13 +728,7 @@ static void handle_new_stream(demuxer_t *demuxer, int i)
         sh->codec->disp_h = codec->height;
         if (st->avg_frame_rate.num)
             sh->codec->fps = av_q2d(st->avg_frame_rate);
-        if (st->nb_frames <= 1 && (
-                sh->attached_picture ||
-                bstr_endswith0(bstr0(priv->avif->name), "_pipe") ||
-                strcmp(priv->avif->name, "alias_pix") == 0 ||
-                strcmp(priv->avif->name, "gif") == 0 ||
-                strcmp(priv->avif->name, "image2pipe") == 0
-            )) {
+        if (is_image(st, sh->attached_picture, priv->avif)) {
             MP_VERBOSE(demuxer, "Assuming this is an image format.\n");
             sh->image = true;
             sh->codec->fps = priv->mf_fps;
@@ -739,14 +743,12 @@ static void handle_new_stream(demuxer_t *demuxer, int i)
                 sh->codec->rotate = (((int)(-r) % 360) + 360) % 360;
         }
 
-#if LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(56, 43, 100)
         if ((sd = av_stream_get_side_data(st, AV_PKT_DATA_DOVI_CONF, NULL))) {
             const AVDOVIDecoderConfigurationRecord *cfg = (void *) sd;
             MP_VERBOSE(demuxer, "Found Dolby Vision config record: profile "
                        "%d level %d\n", cfg->dv_profile, cfg->dv_level);
             av_format_inject_global_side_data(avfc);
         }
-#endif
 
         // This also applies to vfw-muxed mkv, but we can't detect these easily.
         sh->codec->avi_dts = matches_avinputformat_name(priv, "avi");
@@ -1305,10 +1307,11 @@ static void demux_seek_lavf(demuxer_t *demuxer, double seek_pts, int flags)
     if (priv->pcm_seek_hack && !priv->pcm_seek_hack_packet_size) {
         // This might for example be the initial seek. Fuck it up like the
         // bullshit it is.
-        AVPacket pkt = {0};
-        if (av_read_frame(priv->avfc, &pkt) >= 0)
-            priv->pcm_seek_hack_packet_size = pkt.size;
-        av_packet_unref(&pkt);
+        AVPacket *pkt = av_packet_alloc();
+        MP_HANDLE_OOM(pkt);
+        if (av_read_frame(priv->avfc, pkt) >= 0)
+            priv->pcm_seek_hack_packet_size = pkt->size;
+        av_packet_free(&pkt);
         add_new_streams(demuxer);
     }
     if (priv->pcm_seek_hack && priv->pcm_seek_hack_packet_size &&

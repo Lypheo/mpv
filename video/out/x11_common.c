@@ -67,6 +67,7 @@
 #define vo_wm_STAYS_ON_TOP 4
 #define vo_wm_ABOVE 8
 #define vo_wm_BELOW 16
+#define vo_wm_STICKY 32
 
 /* EWMH state actions, see
          http://freedesktop.org/Standards/wm-spec/index.html#id2768769 */
@@ -149,6 +150,7 @@ static void vo_x11_move_resize(struct vo *vo, bool move, bool resize,
                                struct mp_rect rc);
 static void vo_x11_maximize(struct vo *vo);
 static void vo_x11_minimize(struct vo *vo);
+static void vo_x11_sticky(struct vo *vo, bool sticky);
 
 #define XA(x11, s) (XInternAtom((x11)->display, # s, False))
 #define XAs(x11, s) XInternAtom((x11)->display, s, False)
@@ -327,6 +329,7 @@ static int net_wm_support_state_test(struct vo_x11_state *x11, Atom atom)
     NET_WM_STATE_TEST(ABOVE);
     NET_WM_STATE_TEST(STAYS_ON_TOP);
     NET_WM_STATE_TEST(BELOW);
+    NET_WM_STATE_TEST(STICKY);
     return 0;
 }
 
@@ -439,6 +442,7 @@ static void xrandr_read(struct vo_x11_state *x11)
             x11->has_mesa = x11->has_mesa || amd >= 0 || intel >= 0 ||
                             nouveau >= 0 || radeon >= 0;
             x11->has_nvidia = x11->has_nvidia || nvidia >= 0;
+            XRRFreeProviderInfo(info);
         }
         if (x11->present_code)
             xpresent_set(x11);
@@ -708,6 +712,10 @@ static const struct mp_keymap keymap[] = {
     {XK_F4, MP_KEY_F+4}, {XK_F5, MP_KEY_F+5}, {XK_F6, MP_KEY_F+6},
     {XK_F7, MP_KEY_F+7}, {XK_F8, MP_KEY_F+8}, {XK_F9, MP_KEY_F+9},
     {XK_F10, MP_KEY_F+10}, {XK_F11, MP_KEY_F+11}, {XK_F12, MP_KEY_F+12},
+    {XK_F13, MP_KEY_F+13}, {XK_F14, MP_KEY_F+14}, {XK_F15, MP_KEY_F+15},
+    {XK_F16, MP_KEY_F+16}, {XK_F17, MP_KEY_F+17}, {XK_F18, MP_KEY_F+18},
+    {XK_F19, MP_KEY_F+19}, {XK_F20, MP_KEY_F+20}, {XK_F21, MP_KEY_F+21},
+    {XK_F22, MP_KEY_F+22}, {XK_F23, MP_KEY_F+23}, {XK_F24, MP_KEY_F+24},
 
     // numpad independent of numlock
     {XK_KP_Subtract, '-'}, {XK_KP_Add, '+'}, {XK_KP_Multiply, '*'},
@@ -1311,6 +1319,7 @@ void vo_x11_check_events(struct vo *vo)
                                                present_event->msc);
                 }
             }
+            XFreeEventData(x11->display, cookie);
             break;
         }
         default:
@@ -1430,8 +1439,8 @@ static void vo_x11_update_window_title(struct vo *vo)
     /* _NET_WM_NAME and _NET_WM_ICON_NAME must be sanitized to UTF-8. */
     void *tmp = talloc_new(NULL);
     struct bstr b_title = bstr_sanitize_utf8_latin1(tmp, bstr0(x11->window_title));
-    vo_x11_set_property_utf8(vo, XA(x11, _NET_WM_NAME), b_title.start);
-    vo_x11_set_property_utf8(vo, XA(x11, _NET_WM_ICON_NAME), b_title.start);
+    vo_x11_set_property_utf8(vo, XA(x11, _NET_WM_NAME), bstrto0(tmp, b_title));
+    vo_x11_set_property_utf8(vo, XA(x11, _NET_WM_ICON_NAME), bstrto0(tmp, b_title));
     talloc_free(tmp);
 }
 
@@ -1599,9 +1608,18 @@ static void vo_x11_map_window(struct vo *vo, struct mp_rect rc)
         x11_send_ewmh_msg(x11, "_NET_WM_FULLSCREEN_MONITORS", params);
     }
 
-    if (x11->opts->all_workspaces || x11->opts->geometry.ws > 0) {
-        long v = x11->opts->all_workspaces
-                ? 0xFFFFFFFF : x11->opts->geometry.ws - 1;
+    if (x11->opts->all_workspaces) {
+        if (x11->wm_type & vo_wm_STICKY) {
+            Atom state = XA(x11, _NET_WM_STATE_STICKY);
+            XChangeProperty(x11->display, x11->window, XA(x11, _NET_WM_STATE), XA_ATOM,
+                            32, PropModeReplace, (unsigned char *)&state, 1);
+        } else {
+            long v = 0xFFFFFFFF;
+            XChangeProperty(x11->display, x11->window, XA(x11, _NET_WM_DESKTOP),
+                            XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&v, 1);
+        }
+    } else if (x11->opts->geometry.ws > 0) {
+        long v = x11->opts->geometry.ws - 1;
         XChangeProperty(x11->display, x11->window, XA(x11, _NET_WM_DESKTOP),
                         XA_CARDINAL, 32, PropModeReplace, (unsigned char *)&v, 1);
     }
@@ -1737,6 +1755,23 @@ void vo_x11_config_vo_window(struct vo *vo)
     vo_x11_update_geometry(vo);
     update_vo_size(vo);
     x11->pending_vo_events &= ~VO_EVENT_RESIZE; // implicitly done by the VO
+}
+
+static void vo_x11_sticky(struct vo *vo, bool sticky)
+{
+    struct vo_x11_state *x11 = vo->x11;
+    if (x11->wm_type & vo_wm_STICKY) {
+        x11_set_ewmh_state(x11, "_NET_WM_STATE_STICKY", sticky);
+    } else {
+        long params[5] = {0xFFFFFFFF, 1};
+        if (!sticky) {
+            x11_get_property_copy(x11, x11->rootwin,
+                XA(x11, _NET_CURRENT_DESKTOP),
+                XA_CARDINAL, 32, &params[0],
+                sizeof(params[0]));
+        }
+        x11_send_ewmh_msg(x11, "_NET_WM_DESKTOP", params);
+    }
 }
 
 static void vo_x11_setlayer(struct vo *vo, bool ontop)
@@ -1937,7 +1972,8 @@ bool vo_x11_check_visible(struct vo *vo) {
     struct vo_x11_state *x11 = vo->x11;
     struct mp_vo_opts *opts = x11->opts;
 
-    bool render = !x11->hidden || VS_IS_DISP(opts->video_sync);
+    bool render = !x11->hidden || opts->force_render ||
+                  VS_IS_DISP(opts->video_sync);
     return render;
 }
 
@@ -1960,16 +1996,8 @@ int vo_x11_control(struct vo *vo, int *events, int request, void *arg)
                 vo_x11_setlayer(vo, opts->ontop);
             if (opt == &opts->border)
                 vo_x11_decoration(vo, opts->border);
-            if (opt == &opts->all_workspaces) {
-                long params[5] = {0xFFFFFFFF, 1};
-                if (!opts->all_workspaces) {
-                    x11_get_property_copy(x11, x11->rootwin,
-                                          XA(x11, _NET_CURRENT_DESKTOP),
-                                          XA_CARDINAL, 32, &params[0],
-                                          sizeof(params[0]));
-                }
-                x11_send_ewmh_msg(x11, "_NET_WM_DESKTOP", params);
-            }
+            if (opt == &opts->all_workspaces)
+                vo_x11_sticky(vo, opts->all_workspaces);
             if (opt == &opts->window_minimized)
                 vo_x11_minimize(vo);
             if (opt == &opts->window_maximized)
@@ -2088,6 +2116,12 @@ int vo_x11_control(struct vo *vo, int *events, int request, void *arg)
             return VO_NOTAVAIL;
         ((int *)arg)[0] = selected_disp->rc.x1 - selected_disp->rc.x0;
         ((int *)arg)[1] = selected_disp->rc.y1 - selected_disp->rc.y0;
+        return VO_TRUE;
+    }
+    case VOCTRL_GET_WINDOW_ID: {
+        if (!x11->window)
+            return VO_NOTAVAIL;
+        *(int64_t *)arg = x11->window;
         return VO_TRUE;
     }
     case VOCTRL_GET_HIDPI_SCALE:

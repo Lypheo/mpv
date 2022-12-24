@@ -134,6 +134,11 @@ static int preinit(struct vo *vo)
 
     if (!vo_wayland_init(vo))
         return -1;
+    if (!vo->wl->shm) {
+        MP_FATAL(vo->wl, "Compositor doesn't support the %s protocol!\n",
+                 wl_shm_interface.name);
+        return -1;
+    }
     p->sws = mp_sws_alloc(vo);
     p->sws->log = vo->log;
     mp_sws_enable_cmdline_opts(p->sws, vo->global);
@@ -262,14 +267,14 @@ static void flip_page(struct vo *vo)
     if (!wl->opts->disable_vsync)
         vo_wayland_wait_frame(wl);
 
-    if (wl->presentation)
+    if (wl->use_present)
         present_sync_swap(wl->present);
 }
 
 static void get_vsync(struct vo *vo, struct vo_vsync_info *info)
 {
     struct vo_wayland_state *wl = vo->wl;
-    if (wl->presentation)
+    if (wl->use_present)
         present_sync_get_info(wl->present, info);
 }
 

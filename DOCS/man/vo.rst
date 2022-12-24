@@ -286,12 +286,13 @@ Available video output drivers are:
     ``--sdl-switch-mode``
         Instruct SDL to switch the monitor video mode when going fullscreen.
 
-``vaapi-wayland``
-    Experimental Wayland output driver designed for use with VA API hardware decoding.
-    The driver is designed to avoid any GPU to CPU copies, and to perform scaling and
-    color space conversion using fixed-function hardware, if available,
-    rather than GPU shaders. This frees up GPU resources for other tasks.
-    Currently this driver is experimental and only works with the ``--hwdec=vaapi`` driver;
+``dmabuf-wayland``
+    Experimental Wayland output driver designed for use with either drm stateless
+    or VA API hardware decoding. The driver is designed to avoid any GPU to CPU copies,
+    and to perform scaling and color space conversion using fixed-function hardware,
+    if available, rather than GPU shaders. This frees up GPU resources for other tasks.
+    Currently this driver is experimental and only works with the ``--hwdec=vaapi``
+    or ``hwdec=drm`` drivers;
     OSD is also not supported. Supported compositors : Weston and Sway.
 
 ``vaapi``
@@ -382,13 +383,54 @@ Available video output drivers are:
     ``--vo-tct-256=<yes|no>`` (default: no)
         Use 256 colors - for terminals which don't support true color.
 
+``kitty``
+    Graphical output for the terminal, using the kitty graphics protocol.
+    Tested with kitty and Konsole.
+
+    You may need to use ``--profile=sw-fast`` to get decent performance.
+
+    Kitty size and alignment options:
+
+    ``--vo-kitty-cols=<columns>``, ``--vo-kitty-rows=<rows>`` (default: 0)
+        Specify the terminal size in character cells, otherwise (0) read it
+        from the terminal, or fall back to 80x25.
+
+    ``--vo-kitty-width=<width>``, ``--vo-kitty-height=<height>`` (default: 0)
+        Specify the available size in pixels, otherwise (0) read it from the
+        terminal, or fall back to 320x240.
+
+    ``--vo-kitty-left=<col>``, ``--vo-kitty-top=<row>`` (default: 0)
+        Specify the position in character cells where the image starts (1 is
+        the first column or row). If 0 (default) then try to automatically
+        determine it according to the other values and the image aspect ratio
+        and zoom.
+
+    ``--vo-kitty-config-clear=<yes|no>`` (default: yes)
+        Whether or not to clear the terminal whenever the output is
+        reconfigured (e.g. when video size changes).
+
+    ``--vo-kitty-alt-screen=<yes|no>`` (default: yes)
+        Whether or not to use the alternate screen buffer and return the
+        terminal to its previous state on exit. When set to no, the last
+        kitty image stays on screen after quit, with the cursor following it.
+
+    ``--vo-kitty-use-shm=<yes|no>`` (default: no)
+        Use shared memory objects to transfer image data to the terminal.
+        This is much faster than sending the data as escape codes, but is not
+        supported by as many terminals. It also only works on the local machine
+        and not via e.g. SSH connections.
+
+        This option is not implemented on Windows.
+
 ``sixel``
     Graphical output for the terminal, using sixels. Tested with ``mlterm`` and
     ``xterm``.
 
-    Note: the Sixel image output is not synchronized with other terminal output
-    from mpv, which can lead to broken images. The option ``--really-quiet``
-    can help with that, and is recommended.
+    Note: the Sixel image output is not synchronized with other terminal
+    output from mpv, which can lead to broken images.
+    The option ``--really-quiet`` can help with that, and is recommended.
+    On some platforms, using the ``--vo-sixel-buffered`` option may work as
+    well.
 
     You may need to use ``--profile=sw-fast`` to get decent performance.
 
@@ -432,9 +474,24 @@ Available video output drivers are:
         to take into account padding at the report - this only works correctly
         when the overall padding per axis is smaller than the number of cells.
 
-    ``--vo-sixel-exit-clear=<yes|no>`` (default: yes)
-        Whether or not to clear the terminal on quit. When set to no - the last
+    ``--vo-sixel-config-clear=<yes|no>`` (default: yes)
+        Whether or not to clear the terminal whenever the output is
+        reconfigured (e.g. when video size changes).
+
+    ``--vo-sixel-alt-screen=<yes|no>`` (default: yes)
+        Whether or not to use the alternate screen buffer and return the
+        terminal to its previous state on exit. When set to no, the last
         sixel image stays on screen after quit, with the cursor following it.
+
+        ``--vo-sixel-exit-clear`` is a deprecated alias for this option and
+        may be removed in the future.
+
+    ``--vo-sixel-buffered=<yes|no>`` (default: no)
+        Buffers the full output sequence before writing it to the terminal.
+        On POSIX platforms, this can help prevent interruption (including from
+        other applications) and thus broken images, but may come at a
+        performance cost with some terminals and is subject to implementation
+        details.
 
     Sixel image quality options:
 
@@ -596,16 +653,6 @@ Available video output drivers are:
         Use ``--drm-mode=help`` to get a list of available modes for all active
         connectors.
 
-    ``--drm-atomic=<no|auto>``
-        Toggle use of atomic modesetting. Mostly useful for debugging.
-
-        :no:    Use legacy modesetting.
-        :auto:  Use atomic modesetting, falling back to legacy modesetting if
-                not available. (default)
-
-        Note: Only affects ``gpu-context=drm``. ``vo=drm`` supports legacy
-        modesetting only.
-
     ``--drm-draw-plane=<primary|overlay|N>``
         Select the DRM plane to which video and OSD is drawn to, under normal
         circumstances. The plane can be specified as ``primary``, which will
@@ -614,11 +661,11 @@ Available video output drivers are:
         based, and related to the CRTC.
         (default: primary)
 
-        When using this option with the drmprime-drm hwdec interop, only the OSD
-        is rendered to this plane.
+        When using this option with the drmprime-overlay hwdec interop, only the
+        OSD is rendered to this plane.
 
     ``--drm-drmprime-video-plane=<primary|overlay|N>``
-        Select the DRM plane to use for video with the drmprime-drm hwdec
+        Select the DRM plane to use for video with the drmprime-overlay hwdec
         interop (used by e.g. the rkmpp hwdec on RockChip SoCs, and v4l2 hwdec:s
         on various other SoC:s). The plane is unused otherwise. This option
         accepts the same values as ``--drm-draw-plane``. (default: overlay)
@@ -644,15 +691,14 @@ Available video output drivers are:
     ``--drm-draw-surface-size=<[WxH]>``
         Sets the size of the surface used on the draw plane. The surface will
         then be upscaled to the current screen resolution. This option can be
-        useful when used together with the drmprime-drm hwdec interop at high
-        resolutions, as it allows scaling the draw plane (which in this case
-        only handles the OSD) down to a size the GPU can handle.
+        useful when used together with the drmprime-overlay hwdec interop at
+        high resolutions, as it allows scaling the draw plane (which in this
+        case only handles the OSD) down to a size the GPU can handle.
 
-        When used without the drmprime-drm hwdec interop this option will just
-        cause the video to get rendered at a different resolution and then
+        When used without the drmprime-overlay hwdec interop this option will
+        just cause the video to get rendered at a different resolution and then
         scaled to screen size.
 
-        Note: this option is only available with DRM atomic support.
         (default: display resolution)
 
     ``--drm-vrr-enabled=<no|yes|auto>``
@@ -676,8 +722,8 @@ Available video output drivers are:
     many of mpv's features (subtitle rendering, OSD/OSC, video filters, etc)
     are not available with this driver.
 
-    To use hardware decoding with ``--vo=gpu`` instead, use
-    ``--hwdec=mediacodec-copy`` along with ``--gpu-context=android``.
+    To use hardware decoding with ``--vo=gpu`` instead, use ``--hwdec=mediacodec``
+    or ``mediacodec-copy`` along with ``--gpu-context=android``.
 
 ``wlshm`` (Wayland only)
     Shared memory video output driver without hardware acceleration that works

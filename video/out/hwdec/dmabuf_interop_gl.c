@@ -180,6 +180,11 @@ static bool vaapi_gl_map(struct ra_hwdec_mapper *mapper,
                 format[0] = DRM_FORMAT_R8;
                 format[1] = DRM_FORMAT_GR88;
                 break;
+            case DRM_FORMAT_YUV420:
+                format[0] = DRM_FORMAT_R8;
+                format[1] = DRM_FORMAT_R8;
+                format[2] = DRM_FORMAT_R8;
+                break;
             case DRM_FORMAT_P010:
                 format[0] = DRM_FORMAT_R16;
                 format[1] = DRM_FORMAT_GR1616;
@@ -189,6 +194,39 @@ static bool vaapi_gl_map(struct ra_hwdec_mapper *mapper,
                        "Cannot map unknown multi-plane format: 0x%08X\n",
                        p_mapper->desc.layers[i].format);
                 return false;
+            }
+        } else {
+            /*
+             * As OpenGL only has one guaranteed rgba format (rgba8), drivers
+             * that support importing dmabuf formats with different channel
+             * orders do implicit swizzling to get to rgba. However, we look at
+             * the original imgfmt to decide channel order, and we then swizzle
+             * based on that. So, we can get into a situation where we swizzle
+             * twice and end up with a mess.
+             *
+             * The simplest way to avoid that is to lie to OpenGL and say that
+             * the surface we are importing is in the natural channel order, so
+             * that our swizzling does the right thing.
+             *
+             * DRM ABGR corresponds to OpenGL RGBA due to different naming
+             * conventions.
+             */
+            switch (format[0]) {
+            case DRM_FORMAT_ARGB8888:
+            case DRM_FORMAT_RGBA8888:
+            case DRM_FORMAT_BGRA8888:
+                format[0] = DRM_FORMAT_ABGR8888;
+                break;
+            case DRM_FORMAT_XRGB8888:
+                format[0] = DRM_FORMAT_XBGR8888;
+                break;
+            case DRM_FORMAT_RGBX8888:
+            case DRM_FORMAT_BGRX8888:
+                // Logically, these two formats should be handled as above,
+                // but there appear to be additional problems that make the
+                // format change here insufficient or incorrect, so we're
+                // doing nothing for now.
+                break;
             }
         }
 
