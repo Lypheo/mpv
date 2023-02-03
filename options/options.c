@@ -48,10 +48,6 @@
 #include "stream/stream.h"
 #include "demux/demux.h"
 
-#if HAVE_DRM
-#include "video/out/drm_common.h"
-#endif
-
 static void print_version(struct mp_log *log)
 {
     mp_print_version(log, true);
@@ -168,6 +164,7 @@ static const m_option_t mp_vo_opt_list[] = {
         {"display-resample", VS_DISP_RESAMPLE},
         {"display-resample-vdrop", VS_DISP_RESAMPLE_VDROP},
         {"display-resample-desync", VS_DISP_RESAMPLE_NONE},
+        {"display-tempo", VS_DISP_TEMPO},
         {"display-adrop", VS_DISP_ADROP},
         {"display-vdrop", VS_DISP_VDROP},
         {"display-desync", VS_DISP_NONE},
@@ -185,9 +182,6 @@ static const m_option_t mp_vo_opt_list[] = {
 #endif
 #if HAVE_WIN32_DESKTOP
     {"vo-mmcss-profile", OPT_STRING(mmcss_profile)},
-#endif
-#if HAVE_DRM
-    {"", OPT_SUBSTRUCT(drm_opts, drm_conf)},
 #endif
 #if HAVE_EGL_ANDROID
     {"android-surface-size", OPT_SIZE_BOX(android_surface_size)},
@@ -828,6 +822,10 @@ static const m_option_t mp_opts[] = {
     {"", OPT_SUBSTRUCT(macos_opts, macos_conf)},
 #endif
 
+#if HAVE_DRM
+    {"", OPT_SUBSTRUCT(drm_opts, drm_conf)},
+#endif
+
 #if HAVE_WAYLAND
     {"", OPT_SUBSTRUCT(wayland_opts, wayland_conf)},
 #endif
@@ -1068,6 +1066,7 @@ static const struct MPOpts mp_default_opts = {
     .cuda_device = -1,
 
     .watch_later_options = (char **)(const char*[]){
+        "start",
         "osd-level",
         "speed",
         "edition",

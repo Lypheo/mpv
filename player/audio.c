@@ -64,9 +64,17 @@ static void update_speed_filters(struct MPContext *mpctx)
         speed = 1.0;
     }
 
-    if (mpctx->display_sync_active && mpctx->video_out->opts->video_sync == VS_DISP_ADROP) {
-        drop *= speed * resample;
-        resample = speed = 1.0;
+    if (mpctx->display_sync_active) {
+        switch (mpctx->video_out->opts->video_sync) {
+            case VS_DISP_ADROP:
+                drop *= speed * resample;
+                resample = speed = 1.0;
+                break;
+            case VS_DISP_TEMPO:
+                speed = mpctx->audio_speed;
+                resample = 1.0;
+                break;
+        }
     }
 
     mp_output_chain_set_audio_speed(ao_c->filter, speed, resample, drop);
@@ -305,8 +313,7 @@ static bool keep_weak_gapless_format(struct mp_aframe *old, struct mp_aframe* ne
 {
     bool res = false;
     struct mp_aframe *new_mod = mp_aframe_new_ref(new);
-    if (!new_mod)
-        abort();
+    MP_HANDLE_OOM(new_mod);
 
     // If the sample formats are compatible (== libswresample generally can
     // convert them), keep the AO. On other changes, recreate it.
@@ -358,8 +365,7 @@ static int reinit_audio_filters_and_output(struct MPContext *mpctx)
 
     // The "ideal" filter output format
     struct mp_aframe *out_fmt = mp_aframe_new_ref(ao_c->filter->output_aformat);
-    if (!out_fmt)
-        abort();
+    MP_HANDLE_OOM(out_fmt);
 
     if (!mp_aframe_config_is_valid(out_fmt)) {
         talloc_free(out_fmt);

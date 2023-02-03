@@ -510,7 +510,7 @@ static struct ra_tex *tex_create(struct ra *ra,
         tex_p->res = (ID3D11Resource *)tex_p->tex3d;
         break;
     default:
-        abort();
+        MP_ASSERT_UNREACHABLE();
     }
 
     tex_p->array_slice = -1;
@@ -1597,8 +1597,8 @@ static void save_cached_program(struct ra *ra, struct ra_renderpass *pass,
         .frag_bytecode_len = frag_bc.len,
         .comp_bytecode_len = comp_bc.len,
     };
-    strncpy(header.magic, cache_magic, sizeof(header.magic));
-    strncpy(header.compiler, spirv->name, sizeof(header.compiler));
+    memcpy(header.magic, cache_magic, sizeof(header.magic));
+    strncpy(header.compiler, spirv->name, sizeof(header.compiler) - 1);
 
     struct bstr *prog = &pass->params.cached_program;
     bstr_xappend(pass, prog, (bstr){ (char *) &header, sizeof(header) });
@@ -2182,7 +2182,7 @@ static void debug_marker(struct ra *ra, const char *msg)
     bool printed_header = false;
     uint64_t messages = ID3D11InfoQueue_GetNumStoredMessages(p->iqueue);
     for (uint64_t i = 0; i < messages; i++) {
-        size_t len;
+        SIZE_T len;
         hr = ID3D11InfoQueue_GetMessage(p->iqueue, i, NULL, &len);
         if (FAILED(hr) || !len)
             goto done;
@@ -2325,7 +2325,7 @@ static struct dll_version get_dll_version(HMODULE dll)
     struct dll_version ret = { 0 };
 
     HRSRC rsrc = FindResourceW(dll, MAKEINTRESOURCEW(VS_VERSION_INFO),
-                               MAKEINTRESOURCEW(VS_FILE_INFO));
+                               VS_FILE_INFO);
     if (!rsrc)
         goto done;
     DWORD size = SizeofResource(dll, rsrc);

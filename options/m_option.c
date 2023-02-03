@@ -770,7 +770,7 @@ static const struct m_opt_choice_alternatives *get_choice(const m_option_t *opt,
             return NULL;
         }
     }
-    abort();
+    MP_ASSERT_UNREACHABLE();
 }
 
 static int choice_get(const m_option_t *opt, void *ta_parent,
@@ -3771,6 +3771,16 @@ static void dup_node(void *ta_parent, struct mpv_node *node)
                 for (int n = 0; n < new->num; n++)
                     new->keys[n] = talloc_strdup(new, oldlist->keys[n]);
             }
+        }
+        break;
+    }
+    case MPV_FORMAT_BYTE_ARRAY: {
+        struct mpv_byte_array *old = node->u.ba;
+        struct mpv_byte_array *new = talloc_zero(ta_parent, struct mpv_byte_array);
+        node->u.ba = new;
+        if (old->size > 0) {
+            *new = *old;
+            new->data = talloc_memdup(new, old->data, old->size);
         }
         break;
     }

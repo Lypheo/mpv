@@ -271,7 +271,7 @@ test_flags = ['-Werror=implicit-function-declaration',
 flags += cc.get_supported_arguments(test_flags)
 
 if cc.has_multi_arguments('-Wformat', '-Werror=format-security')
-    flags += '-Werror=format-security'
+    flags += ['-Wformat', '-Werror=format-security']
 endif
 
 if cc.get_id() == 'gcc'
@@ -521,29 +521,31 @@ features += {'vt.h': cc.has_header_symbol('sys/vt.h', 'VT_GETMODE')}
 
 features += {'consio.h': not features['vt.h'] and cc.has_header_symbol('sys/consio.h', 'VT_GETMODE')}
 
-fragments = join_paths(source_root, 'waftools', 'fragments')
+# macOS's pthread_setname_np is a special snowflake and differs from literally every other platform.
+features += {'osx-thread-name': darwin}
 
-features += {'glibc-thread-name': cc.compiles(files(join_paths(fragments, 'glibc_thread_name.c')),
-                                              name: 'glibc-thread-name check') and posix}
-
-features += {'osx-thread-name': false}
-if not features['glibc-thread-name']
-    features += {'osx-thread-name': cc.compiles(files(join_paths(fragments, 'osx_thread_name.c')),
-                                                name: 'osx-thread-name check')}
+features += {'glibc-thread-name': false}
+if not features['osx-thread-name']
+    features += {'glibc-thread-name': posix and cc.has_function('pthread_setname_np', args: '-D_GNU_SOURCE',
+                                                                dependencies: pthreads, prefix: '#include <pthread.h>')}
 endif
 
 features += {'bsd-thread-name': false}
 if not features['osx-thread-name'] and not features['glibc-thread-name']
-    features += {'bsd-thread-name': cc.compiles(files(join_paths(fragments, 'bsd_thread_name.c')),
-                                                name: 'bsd-thread-name check')}
+    features += {'bsd-thread-name': posix and cc.has_function('pthread_set_name_np', dependencies: pthreads,
+                                                              prefix: '#include <pthread.h>\n#include <pthread_np.h>')}
 endif
 
 features += {'bsd-fstatfs': cc.has_function('fstatfs', prefix: '#include <sys/mount.h>\n#include <sys/param.h>')}
 
 features += {'linux-fstatfs': cc.has_function('fstatfs', prefix: '#include <sys/vfs.h>')}
 
+vector_attribute = '''int main() {
+float v __attribute__((vector_size(32)));
+}
+'''
 vector = get_option('vector').require(
-    cc.compiles(files(join_paths(fragments, 'vector.c')), name: 'vector check'),
+    cc.compiles(vector_attribute, name: 'vector check'),
     error_message: 'the compiler does not support gcc vectors!',
 )
 features += {'vector': vector.allowed()}
@@ -551,6 +553,7 @@ features += {'vector': vector.allowed()}
 
 # various file generations
 tools_directory = join_paths(source_root, 'TOOLS')
+docutils_wrapper = find_program(join_paths(tools_directory, 'docutils-wrapper.py'))
 file2string = find_program(join_paths(tools_directory, 'file2string.py'))
 matroska = find_program(join_paths(tools_directory, 'matroska.py'))
 version_py = find_program(join_paths(source_root, 'version.py'))
@@ -887,7 +890,7 @@ direct3d_opt = get_option('direct3d').require(
     get_option('gpl') and features['win32-desktop'],
     error_message: 'the build is not GPL or this is not a win32 desktop!',
 )
-direct3d = cc.check_header('d3d9.h', required: direct3d_opt)
+direct3d = cc.has_header('d3d9.h', required: direct3d_opt)
 features += {'direct3d': direct3d}
 if features['direct3d']
     sources += files('video/out/vo_direct3d.c')
@@ -962,6 +965,11 @@ if features['sixel']
     sources += files('video/out/vo_sixel.c')
 endif
 
+features += {'posix_shm': false}
+if features['posix']
+    features += {'posix_shm': cc.has_function('shm_open', prefix: '#include <sys/mman.h>')}
+endif
+
 spirv_cross = dependency('spirv-cross-c-shared', required: get_option('spirv-cross'))
 features += {'spirv-cross': spirv_cross.found()}
 if features['spirv-cross']
@@ -983,7 +991,7 @@ wayland = {
              dependency('wayland-cursor', version: '>= 1.15.0', required: get_option('wayland')),
              dependency('wayland-protocols', version: '>= 1.15', required: get_option('wayland')),
              dependency('xkbcommon', version: '>= 0.3.0', required: get_option('wayland'))],
-    'header': cc.check_header('linux/input-event-codes.h', required: get_option('wayland')),
+    'header': cc.has_header('linux/input-event-codes.h', required: get_option('wayland')),
     'scanner': find_program('wayland-scanner', required: get_option('wayland')),
 }
 wayland_deps = true
@@ -1121,12 +1129,17 @@ if features['egl-angle']
     sources += files('video/out/opengl/angle_dynamic.c')
 endif
 
+egl_dep = cc.find_library('EGL', required: get_option('egl-angle-lib'))
 egl_angle_lib = get_option('egl-angle-lib').require(
     features['egl-angle'] and cc.has_function('eglCreateWindowSurface',
+                                               dependencies: egl_dep,
                                                prefix: '#include <EGL/egl.h>'),
     error_message: 'egl-angle-lib could not be found!',
 )
 features += {'egl-angle-lib': egl_angle_lib.allowed()}
+if features['egl-angle-lib']
+    dependencies += egl_dep
+endif
 
 egl_angle_win32 = get_option('egl-angle-win32').require(
     features['egl-angle'] and features['win32-desktop'],
@@ -1188,11 +1201,10 @@ if features['egl-x11']
 endif
 
 plain_gl = get_option('plain-gl').require(
-    get_option('libmpv') and gl_allowed,
-    error_message: 'libmpv was not enabled!',
+    gl_allowed,
+    error_message: 'gl was not enabled!',
 )
-features += {'plain-gl': plain_gl.allowed()}
-if features['plain-gl']
+if plain_gl.allowed()
     features += {'gl': true}
 endif
 
@@ -1361,19 +1373,19 @@ if features['vaapi']
                      'video/vaapi.c')
 endif
 
-vaapi_drm = dependency('libva-drm', version: '>= 1.1.0', required: get_option('vaapi-drm'))
+vaapi_drm = dependency('libva-drm', version: '>= 1.1.0', required: get_option('vaapi-drm').require(features['vaapi']))
 features += {'vaapi-drm': features['vaapi'] and egl_drm.allowed() and vaapi_drm.found()}
 if features['vaapi-drm']
     dependencies += vaapi_drm
 endif
 
-vaapi_wayland = dependency('libva-wayland', version: '>= 1.1.0', required: get_option('vaapi-wayland'))
+vaapi_wayland = dependency('libva-wayland', version: '>= 1.1.0', required: get_option('vaapi-wayland').require(features['vaapi']))
 features += {'vaapi-wayland': features['vaapi'] and features['gl-wayland'] and vaapi_wayland.found()}
 if features['vaapi-wayland']
     dependencies += vaapi_wayland
 endif
 
-vaapi_x11 = dependency('libva-x11', version: '>= 1.1.0', required: get_option('vaapi-x11'))
+vaapi_x11 = dependency('libva-x11', version: '>= 1.1.0', required: get_option('vaapi-x11').require(features['vaapi']))
 features += {'vaapi-x11': features['vaapi'] and features['x11'] and vaapi_x11.found()}
 if features['vaapi-x11']
     dependencies += vaapi_x11
@@ -1439,15 +1451,16 @@ endif
 
 
 # macOS features
-macos_sdk_version_py = find_program(join_paths(source_root, 'TOOLS',
-                                    'macos-sdk-version.py'))
-macos_sdk_info = ['', '0.0']
-if darwin
+macos_sdk_version_py = find_program(join_paths(source_root, 'TOOLS', 'macos-sdk-version.py'),
+                                    required: get_option('swift-build').require(darwin))
+macos_sdk_path = ''
+macos_sdk_version = '0.0'
+if macos_sdk_version_py.found()
     macos_sdk_info = run_command(macos_sdk_version_py, check: true).stdout().split(',')
+    macos_sdk_path = macos_sdk_info[0].strip()
+    macos_sdk_version = macos_sdk_info[1]
 endif
 
-macos_sdk_path = macos_sdk_info[0].strip()
-macos_sdk_version = macos_sdk_info[1]
 if macos_sdk_path != ''
     message('Detected macOS sdk path: ' + macos_sdk_path)
 endif
@@ -1457,6 +1470,23 @@ if macos_sdk_version != '0.0'
     add_languages('objc')
     objc_link_flags = ['-isysroot', macos_sdk_path, '-L/usr/lib', '-L/usr/local/lib']
     add_project_link_arguments(objc_link_flags, language: ['c', 'objc'])
+endif
+
+xcrun = find_program('xcrun', required: get_option('swift-build').require(darwin))
+swift_ver = '0.0'
+if xcrun.found()
+    swift_prog = find_program(run_command(xcrun, '-find', 'swift', check: true).stdout().strip())
+    swift_ver_string = run_command(swift_prog, '-version', check: true).stdout()
+    verRe = '''
+#!/usr/bin/env python3
+import re
+import sys
+verRe = re.compile("(?i)version\s?([\d.]+)")
+swift_ver = verRe.search(sys.argv[1]).group(1)
+sys.stdout.write(swift_ver)
+'''
+    swift_ver = run_command(python, '-c', verRe, swift_ver_string, check: true).stdout()
+    message('Detected Swift version: ' + swift_ver)
 endif
 
 macos_10_11_features = get_option('macos-10-11-features').require(
@@ -1473,23 +1503,6 @@ macos_10_14_features = get_option('macos-10-14-features').require(
     macos_sdk_version.version_compare('>=10.14'),
     error_message: 'a suitable macos sdk version could not be found!',
 )
-
-xcrun = find_program('xcrun', required: get_option('swift-build'))
-swift_ver = '0.0'
-if xcrun.found()
-    swift_prog = find_program(run_command(xcrun, '-find', 'swift', check: true).stdout().strip())
-    swift_ver_string = run_command(swift_prog, '-version', check: true).stdout()
-    verRe = '''
-#!/usr/bin/env python3
-import re
-import sys
-verRe = re.compile("(?i)version\s?([\d.]+)")
-swift_ver = verRe.search(sys.argv[1]).group(1)
-sys.stdout.write(swift_ver)
-'''
-    swift_ver = run_command(python, '-c', verRe, swift_ver_string, check: true).stdout()
-    message('Detected Swift version: ' + swift_ver)
-endif
 
 swift = get_option('swift-build').require(
     darwin and macos_sdk_version.version_compare('>=10.10') and swift_ver.version_compare('>=4.1'),
@@ -1533,8 +1546,8 @@ if swift.allowed()
 endif
 
 macos_touchbar = get_option('macos-touchbar').require(
-    cc.compiles(files(join_paths(fragments, 'touchbar.m')), name: 'macos-touchbar check') and features['cocoa'],
-    error_message: 'Either cocoa could not be found or the macos-touchbar check failed!',
+    features['cocoa'] and cc.has_header('AppKit/NSTouchBar.h'),
+    error_message: 'Either cocoa could not be found or AppKit/NSTouchBar.h could not be found!',
 )
 features += {'macos-touchbar': macos_touchbar.allowed()}
 if features['macos-touchbar']
@@ -1551,20 +1564,29 @@ if features['manpage-build']
     custom_target('manpages',
         input: manpage,
         output: 'mpv.1',
-        command: [rst2man, '--strip-elements-with-class=contents', '@INPUT@', '@OUTPUT@'],
+        command: [
+          docutils_wrapper, rst2man,
+          '--record-dependencies', '@DEPFILE@',
+          '--strip-elements-with-class=contents',
+          '@INPUT@', '@OUTPUT@'],
+        depfile: 'mpv.1.dep',
         install: true,
         install_dir: join_paths(mandir, 'man1')
     )
 endif
 
-rst2html = find_program('rst2html', required: get_option('html-build'))
+rst2html = find_program('rst2html', 'rst2html.py', required: get_option('html-build'))
 features += {'html-build': rst2html.found()}
 if features['html-build']
     datadir = get_option('datadir')
     custom_target('html-manpages',
         input: manpage,
         output: 'mpv.html',
-        command: [rst2html, '@INPUT@', '@OUTPUT@'],
+        command: [
+          docutils_wrapper, rst2html,
+          '--record-dependencies', '@DEPFILE@',
+          '@INPUT@', '@OUTPUT@'],
+        depfile: 'mpv.html.dep',
         install: true,
         install_dir: join_paths(datadir, 'doc', 'mpv')
     )
@@ -1590,9 +1612,6 @@ endif
 configuration = 'meson configure build ' + '-Dprefix=' + get_option('prefix') + \
                 ' -Dbuildtype=' + get_option('buildtype') + \
                 ' -Doptimization=' + get_option('optimization')
-
-features += {'cplayer': get_option('cplayer')}
-features += {'libmpv-' + get_option('default_library'): get_option('libmpv')}
 
 
 # Set config.h
@@ -1630,6 +1649,10 @@ conf_data.set_quoted('MPV_CONFDIR', join_paths(get_option('prefix'), get_option(
 configure_file(output : 'config.h', configuration : conf_data)
 message('List of enabled features: ' + feature_str)
 
+# These are intentionally not added to conf_data.
+features += {'cplayer': get_option('cplayer')}
+features += {'libmpv-' + get_option('default_library'): get_option('libmpv')}
+
 
 # build targets
 if win32
@@ -1652,15 +1675,18 @@ if win32
 endif
 
 
-if get_option('libmpv')
-    client_h_define = cc.get_define('MPV_CLIENT_API_VERSION', prefix: '#include "libmpv/client.h"',
-                                    include_directories: include_directories('.'))
-    major = client_h_define.split('|')[0].split('<<')[0].strip('() ')
-    minor = client_h_define.split('|')[1].strip('() ')
-    client_api_version = major + '.' + minor + '.0'
+client_h_define = cc.get_define('MPV_CLIENT_API_VERSION', prefix: '#include "libmpv/client.h"',
+                                include_directories: include_directories('.'))
+major = client_h_define.split('|')[0].split('<<')[0].strip('() ')
+minor = client_h_define.split('|')[1].strip('() ')
+client_api_version = major + '.' + minor + '.0'
 
-    libmpv = library('mpv', sources, dependencies: dependencies, gnu_symbol_visibility: 'hidden',
-                     version: client_api_version, include_directories: includedir, install: true)
+libmpv = library('mpv', sources, dependencies: dependencies, gnu_symbol_visibility: 'hidden',
+                 version: client_api_version, include_directories: includedir,
+                 install: get_option('libmpv'), build_by_default: get_option('libmpv'))
+
+
+if get_option('libmpv')
     pkg = import('pkgconfig')
     pkg.generate(libmpv, version: client_api_version,
                  description: 'mpv media player client library')
@@ -1668,6 +1694,9 @@ if get_option('libmpv')
     headers = ['libmpv/client.h', 'libmpv/render.h',
                'libmpv/render_gl.h', 'libmpv/stream_cb.h']
     install_headers(headers, subdir: 'mpv')
+
+    libmpv_test = executable('libmpv-test', 'libmpv/test.c', link_with: [libmpv])
+    test('libmpv', libmpv_test)
 endif
 
 if get_option('cplayer')
@@ -1698,8 +1727,8 @@ if get_option('cplayer')
                  rename: 'mpv.svg')
     install_data('etc/mpv-symbolic.svg', install_dir: join_paths(hicolor_dir, 'symbolic', 'apps'))
 
-    executable('mpv', sources, dependencies: dependencies, win_subsystem: 'windows,6.0',
-               include_directories: includedir, install: true)
+    executable('mpv', objects: libmpv.extract_all_objects(recursive: true), dependencies: dependencies,
+               win_subsystem: 'windows,6.0', include_directories: includedir, install: true)
 endif
 
 summary({'d3d11': features['d3d11'],

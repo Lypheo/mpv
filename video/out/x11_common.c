@@ -436,11 +436,12 @@ static void xrandr_read(struct vo_x11_state *x11)
             bstr_lower(provider_name);
             int amd = bstr_find0(provider_name, "amd");
             int intel = bstr_find0(provider_name, "intel");
+            int modesetting = bstr_find0(provider_name, "modesetting");
             int nouveau = bstr_find0(provider_name, "nouveau");
             int nvidia = bstr_find0(provider_name, "nvidia");
             int radeon = bstr_find0(provider_name, "radeon");
             x11->has_mesa = x11->has_mesa || amd >= 0 || intel >= 0 ||
-                            nouveau >= 0 || radeon >= 0;
+                            modesetting >= 0 || nouveau >= 0 || radeon >= 0;
             x11->has_nvidia = x11->has_nvidia || nvidia >= 0;
             XRRFreeProviderInfo(info);
         }
@@ -595,7 +596,7 @@ static void vo_x11_get_bounding_monitors(struct vo_x11_state *x11, long b[4])
     XFree(screens);
 }
 
-int vo_x11_init(struct vo *vo)
+bool vo_x11_init(struct vo *vo)
 {
     char *dispName;
 
@@ -684,11 +685,11 @@ int vo_x11_init(struct vo *vo)
 
     vo_x11_update_geometry(vo);
 
-    return 1;
+    return true;
 
 error:
     vo_x11_uninit(vo);
-    return 0;
+    return false;
 }
 
 static const struct mp_keymap keymap[] = {
@@ -2249,7 +2250,7 @@ bool vo_x11_screen_is_composited(struct vo *vo)
 {
     struct vo_x11_state *x11 = vo->x11;
     char buf[50];
-    sprintf(buf, "_NET_WM_CM_S%d", x11->screen);
+    snprintf(buf, sizeof(buf), "_NET_WM_CM_S%d", x11->screen);
     Atom NET_WM_CM = XInternAtom(x11->display, buf, False);
     return XGetSelectionOwner(x11->display, NET_WM_CM) != None;
 }

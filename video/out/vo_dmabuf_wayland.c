@@ -1,6 +1,4 @@
 /*
- * Based on vo_gl.c by Reimar Doeffinger.
- *
  * This file is part of mpv.
  *
  * mpv is free software; you can redistribute it and/or
@@ -62,6 +60,8 @@ struct priv {
     struct wlbuf_pool *wlbuf_pool;
     bool want_reset;
     uint64_t reset_count;
+    struct mp_rect src;
+    bool resized;
 
 #if HAVE_VAAPI
     VADisplay display;
@@ -72,6 +72,12 @@ struct priv {
 static uintptr_t vaapi_key_provider(struct mp_image *src)
 {
     return va_surface_id(src);
+}
+
+static void close_file_descriptors(VADRMPRIMESurfaceDescriptor desc)
+{
+    for (int i = 0; i < desc.num_objects; i++)
+        close(desc.objects[i].fd);
 }
 
 /* va-api dmabuf importer */
@@ -89,6 +95,8 @@ static bool vaapi_dmabuf_importer(struct mp_image *src, struct wlbuf_pool_entry*
         /* invalid surface warning => composed layers not supported */
         if (status == VA_STATUS_ERROR_INVALID_SURFACE)
             MP_VERBOSE(entry->vo, "vaExportSurfaceHandle: composed layers not supported.\n");
+        close_file_descriptors(desc);
+
         return false;
     }
     bool success = false;
@@ -108,8 +116,7 @@ static bool vaapi_dmabuf_importer(struct mp_image *src, struct wlbuf_pool_entry*
     success = true;
 
 done:
-    for (int i = 0; i < desc.num_objects; i++)
-        close(desc.objects[i].fd);
+    close_file_descriptors(desc);
 
     return success;
 }
@@ -150,27 +157,57 @@ static bool drmprime_dmabuf_importer(struct mp_image *src, struct wlbuf_pool_ent
 }
 #endif
 
+static void set_viewport_source(struct vo *vo, struct mp_rect src) {
+    struct priv *p = vo->priv;
+    struct vo_wayland_state *wl = vo->wl;
+
+    if (wl->video_viewport && !mp_rect_equals(&p->src, &src)) {
+        // 1. update viewport source
+        wp_viewport_set_source(wl->video_viewport, src.x0 << 8,
+                               src.y0 << 8, mp_rect_w(src) << 8,
+                               mp_rect_h(src) << 8);
+        // 2. reset buffer pool
+        p->want_reset = true;
+        p->reset_count = 0;
+
+        // 3. update to new src dimensions
+        p->src = src;
+    }
+}
+
 static void resize(struct vo *vo)
 {
+    struct priv *p = vo->priv;
     struct vo_wayland_state *wl = vo->wl;
     struct mp_rect src;
     struct mp_rect dst;
     struct mp_osd_res osd;
-    const int width = wl->scaling * mp_rect_w(wl->geometry);
-    const int height = wl->scaling * mp_rect_h(wl->geometry);
+    struct mp_vo_opts *vo_opts = wl->vo_opts;
+    const int width = mp_rect_w(wl->geometry);
+    const int height = mp_rect_h(wl->geometry);
     
     vo_wayland_set_opaque_region(wl, 0);
     vo->dwidth = width;
     vo->dheight = height;
-    vo_get_src_dst_rects(vo, &src, &dst, &osd);
 
+    // top level viewport is calculated with pan set to zero
+    vo->opts->pan_x = 0;
+    vo->opts->pan_y = 0;
+    vo_get_src_dst_rects(vo, &src, &dst, &osd);
     if (wl->viewport)
         wp_viewport_set_destination(wl->viewport, 2 * dst.x0 + mp_rect_w(dst), 2 * dst.y0 + mp_rect_h(dst));
 
+    //now we restore pan for video viewport caculation
+    vo->opts->pan_x = vo_opts->pan_x;
+    vo->opts->pan_y = vo_opts->pan_y;
+    vo_get_src_dst_rects(vo, &src, &dst, &osd);
     if (wl->video_viewport)
         wp_viewport_set_destination(wl->video_viewport, mp_rect_w(dst), mp_rect_h(dst));
     wl_subsurface_set_position(wl->video_subsurface, dst.x0, dst.y0);
+    set_viewport_source(vo, src);
+
     vo->want_redraw = true;
+    p->resized = true;
 }
 
 static void draw_frame(struct vo *vo, struct vo_frame *frame)
@@ -264,6 +301,10 @@ static int control(struct vo *vo, uint32_t request, void *data)
     int ret;
 
     switch (request) {
+    case VOCTRL_SET_PANSCAN:
+        if (p->resized)
+            resize(vo);
+        return VO_TRUE;
     case VOCTRL_LOAD_HWDEC_API:
         assert(p->hwdec_ctx.ra);
         struct hwdec_imgfmt_request* req = (struct hwdec_imgfmt_request*)data;
@@ -315,33 +356,32 @@ static int preinit(struct vo *vo)
     p->global = vo->global;
     p->ctx = ra_ctx_create_by_name(vo, "wldmabuf");
     if (!p->ctx)
-       goto err_out;
+       goto err;
     assert(p->ctx->ra);
 
-    if (!vo->wl->dmabuf) {
-        MP_FATAL(vo->wl, "Compositor doesn't support the %s protocol!\n",
+    if (!vo->wl->dmabuf || !vo->wl->dmabuf_feedback) {
+        MP_FATAL(vo->wl, "Compositor doesn't support the %s (ver. 4) protocol!\n",
                  zwp_linux_dmabuf_v1_interface.name);
-        return VO_ERROR;
+        goto err;
     }
 
     if (!vo->wl->shm) {
         MP_FATAL(vo->wl, "Compositor doesn't support the %s protocol!\n",
                  wl_shm_interface.name);
-        return VO_ERROR;
+        goto err;
     }
 
     if (!vo->wl->video_subsurface) {
         MP_FATAL(vo->wl, "Compositor doesn't support the %s protocol!\n",
                  wl_subcompositor_interface.name);
-        return VO_ERROR;
+        goto err;
     }
 
     if (!vo->wl->viewport) {
         MP_FATAL(vo->wl, "Compositor doesn't support the %s protocol!\n",
                  wp_viewporter_interface.name);
-        return VO_ERROR;
+        goto err;
     }
-
 
     if (vo->wl->single_pixel_manager) {
 #if HAVE_WAYLAND_PROTOCOLS_1_27
@@ -354,15 +394,16 @@ static int preinit(struct vo *vo)
         int stride = MP_ALIGN_UP(width * 4, 16);
         int fd = vo_wayland_allocate_memfd(vo, stride);
         if (fd < 0)
-            return VO_ERROR;
+            goto err;
         p->solid_buffer_pool = wl_shm_create_pool(vo->wl->shm, fd, height * stride);
+        close(fd);
         if (!p->solid_buffer_pool)
-            return VO_ERROR;
+            goto err;
         p->solid_buffer = wl_shm_pool_create_buffer(
             p->solid_buffer_pool, 0, width, height, stride, WL_SHM_FORMAT_XRGB8888);
     }
     if (!p->solid_buffer)
-        return VO_ERROR;
+        goto err;
 
     wl_surface_attach(vo->wl->surface, p->solid_buffer, 0, 0);
 
@@ -375,12 +416,13 @@ static int preinit(struct vo *vo)
         .ra = p->ctx->ra,
     };
     ra_hwdec_ctx_init(&p->hwdec_ctx, vo->hwdec_devs, NULL, true);
+    p->src = (struct mp_rect){0, 0, 0, 0};
 
     return 0;
-err_out:
-    uninit(vo);
 
-    return VO_ERROR;
+err:
+    uninit(vo);
+    return -1;
 }
 
 const struct vo_driver video_out_dmabuf_wayland = {

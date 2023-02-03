@@ -6,12 +6,15 @@ sys.path.insert(0, os.getcwd())
 from shlex import split
 from waflib.Configure import conf
 from waflib.Tools import c_preproc
+from waflib.Tools.compiler_c import c_compiler
 from waflib import Utils
 from waftools.checks.generic import *
 from waftools.checks.custom import *
 
 c_preproc.go_absolute=True # enable system folders
 c_preproc.standard_includes.append('/usr/local/include')
+
+c_compiler['win32'].remove('msvc')
 
 APPNAME = 'mpv'
 
@@ -541,6 +544,11 @@ video_output_features = [
         'deps': 'wayland',
         'func': check_pkg_config('wayland-protocols >= 1.27'),
     } , {
+        'name': 'wayland-protocols-1-31',
+        'desc': 'wayland-protocols version 1.31+',
+        'deps': 'wayland',
+        'func': check_pkg_config('wayland-protocols >= 1.31'),
+    } , {
         'name': 'memfd_create',
         'desc': "Linux's memfd_create()",
         'deps': 'wayland',
@@ -639,8 +647,6 @@ video_output_features = [
         'groups': [ 'gl' ],
         'func': check_statement(['EGL/egl.h'],
                                 'eglCreateWindowSurface(0, 0, 0, 0)',
-                                cflags=['-DGL_APICALL=', '-DEGLAPI=',
-                                        '-DANGLE_NO_ALIASES', '-DANGLE_EXPORT='],
                                 lib=['EGL', 'GLESv2', 'dxguid', 'd3d9',
                                      'gdi32', 'stdc++'])
     }, {
@@ -814,6 +820,11 @@ video_output_features = [
         'desc': 'drmIsKMS() function',
         'deps': 'drm',
         'func': check_pkg_config('libdrm', '>= 2.4.105'),
+    }, {
+        'name': 'posix-shm',
+        'desc': "POSIX shared memory API",
+        'deps': 'posix',
+        'func': check_statement('sys/mman.h', 'shm_open("",0,0)')
     }
 ]
 
@@ -1005,7 +1016,7 @@ def configure(ctx):
 
     ctx.add_os_flags('LIBRARY_PATH')
 
-    ctx.load('compiler_c')
+    ctx.load('compiler_c python')
     ctx.load('waf_customizations')
     ctx.load('dependencies')
     ctx.load('detections.compiler_swift')
@@ -1058,18 +1069,15 @@ def configure(ctx):
         ctx.env.LINKFLAGS += ['-rdynamic']
 
     ctx.store_dependencies_lists()
+    from waflib import Logs
+    Logs.error("WARNING: Building mpv with waf is deprecated and will be removed the future! It is recommended to switch to meson as soon as possible.")
 
 def __write_version__(ctx):
-    ctx.env.VERSIONH_ST = '--versionh="%s"'
-    ctx.env.CWD_ST = '--cwd="%s"'
-    ctx.env.VERSIONSH_CWD = [ctx.srcnode.abspath()]
-
     ctx(
-        source = 'version.sh',
+        source = 'version.py',
         target = 'generated/version.h',
-        rule   = 'sh ${SRC} ${CWD_ST:VERSIONSH_CWD} ${VERSIONH_ST:TGT}',
-        always = True,
-        update_outputs = True)
+        rule   = '${PYTHON} ${SRC} ${TGT}',
+        always = True)
 
 def build(ctx):
     if ctx.options.variant not in ctx.all_envs:

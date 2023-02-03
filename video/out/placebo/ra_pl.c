@@ -52,6 +52,10 @@ struct ra *ra_create_pl(pl_gpu gpu, struct mp_log *log)
     if (gpu->limits.max_variables)
         ra->caps |= RA_CAP_GLOBAL_UNIFORM;
 #endif
+#if PL_API_VER >= 234
+    if (!gpu->limits.host_cached)
+        ra->caps |= RA_CAP_SLOW_DR;
+#endif
 
     if (gpu->limits.max_tex_1d_dim)
         ra->caps |= RA_CAP_TEX_1D;
@@ -527,10 +531,10 @@ static struct ra_renderpass *renderpass_create_pl(struct ra *ra,
             pl_params.blend_params = &blend_params;
             blend_params = (struct pl_blend_params) {
                 // Same enum order as ra_blend
-                .src_rgb = (enum ra_blend) params->blend_src_rgb,
-                .dst_rgb = (enum ra_blend) params->blend_dst_rgb,
-                .src_alpha = (enum ra_blend) params->blend_src_alpha,
-                .dst_alpha = (enum ra_blend) params->blend_dst_alpha,
+                .src_rgb = (enum pl_blend_mode) params->blend_src_rgb,
+                .dst_rgb = (enum pl_blend_mode) params->blend_dst_rgb,
+                .src_alpha = (enum pl_blend_mode) params->blend_src_alpha,
+                .dst_alpha = (enum pl_blend_mode) params->blend_dst_alpha,
             };
         }
 
@@ -617,7 +621,7 @@ static void renderpass_run_pl(struct ra *ra,
             case RA_VARTYPE_BUF_RW:
                 bind.object = (* (struct ra_buf **) val->data)->priv;
                 break;
-            default: abort();
+            default: MP_ASSERT_UNREACHABLE();
             };
 
             p->binds[p->inp_index[val->index]] = bind;

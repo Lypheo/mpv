@@ -1032,8 +1032,8 @@ Watch Later
 ``--watch-later-options=option1,option2,...``
     The options that are saved in "watch later" files if they have been changed
     since when mpv started. These values will be restored the next time the
-    files are played. The playback position is always saved as ``start``, so
-    adding ``start`` to this list has no effect.
+    files are played. Note that the playback position is saved via the ``start``
+    option.
 
     When removing options, existing watch later data won't be modified and will
     still be applied fully, but new watch later data won't contain these
@@ -1049,8 +1049,7 @@ Watch Later
           ``--watch-later-options-remove=mute``
           The volume and mute state won't be saved to watch later files.
         - ``--watch-later-options-clr``
-          No option will be saved to watch later files except the starting
-          position.
+          No option will be saved to watch later files.
 
 ``--write-filename-in-watch-later-config``
     Prepend the watch later config files with the name of the file they refer
@@ -1701,14 +1700,18 @@ Video
     support this, then it will be treated as ``cpu``, regardless of the setting.
     Currently, only ``gpu-next`` supports film grain application.
 
-``--vd-lavc-dr=<yes|no>``
-    Enable direct rendering (default: yes). If this is set to ``yes``, the
+``--vd-lavc-dr=<auto|yes|no>``
+    Enable direct rendering (default: auto). If this is set to ``yes``, the
     video will be decoded directly to GPU video memory (or staging buffers).
     This can speed up video upload, and may help with large resolutions or
     slow hardware. This works only with the following VOs:
 
         - ``gpu``: requires at least OpenGL 4.4 or Vulkan.
         - ``libmpv``: The libmpv render API has optional support.
+
+    The ``auto`` option will try to guess whether DR can improve performance
+    on your particular hardware. Currently this enables it on AMD or NVIDIA
+    if using OpenGL or unconditionally if using Vulkan.
 
     Using video filters of any kind that write to the image data (or output
     newly allocated frames) will silently disable the DR code path.
@@ -3318,8 +3321,9 @@ Window
     draw directly on the root window.
 
     On win32, the ID is interpreted as ``HWND``. Pass it as value cast to
-    ``intptr_t``. mpv will create its own window, and set the wid window as
-    parent, like with X11.
+    ``uint32_t`` (all Windows handles are 32-bit), this is important as mpv will
+    not accept negative values. mpv will create its own window and set the
+    wid window as parent, like with X11.
 
     On macOS/Cocoa, the ID is interpreted as ``NSView*``. Pass it as value cast
     to ``intptr_t``. mpv will create its own sub-view. Because macOS does not
@@ -3818,6 +3822,33 @@ Demuxer
 
     (This value tends to be fuzzy, because many file formats don't store linear
     timestamps.)
+
+``--demuxer-hysteresis-secs=<seconds>``
+    Once the ``--demuxer-max-bytes`` limit is reached, this value can be used
+    to specify a hysteresis before the demuxer will buffer ahead again. This
+    specifies the maximum number of seconds from the current playback position
+    that needs to be remaining in the cache before the demuxer will continue
+    buffering ahead.
+
+    For example, with a value of 10 seconds specified, the demuxer will buffer
+    ahead up to ``--demuxer-max-bytes`` and won't start buffering ahead again
+    until there is only 10 seconds of content left in the cache. When the
+    demuxer starts buffering ahead again, it will buffer ahead up to
+    ``--demuxer-max-bytes`` and stop until there's only 10 seconds of content
+    remaining in the cache, and so on.
+
+    This can provide significant power savings and reduce load by making the
+    demuxer only buffer ahead in chunks at a time rather than buffering ahead
+    nonstop to keep the cache filled.
+
+    If you want to save power and reduce load, configure this to a small number
+    that's much lower than ``--cache-secs`` or ``--demuxer-readahead-secs``.
+    If it takes a long time to buffer anything at all for a given stream (like
+    when reading from a very slow disk is involved), then the hysteresis value
+    should be larger to compensate.
+
+    The default value is 0 seconds, which disables the caching hysteresis. A
+    value of 10 seconds probably works well for most usecases.
 
 ``--prefetch-playlist=<yes|no>``
     Prefetch next playlist entry while playback of the current entry is ending
@@ -5579,13 +5610,13 @@ them.
 ``--wayland-app-id=<string>``
     Set the client app id for Wayland-based video output methods (default: ``mpv``).
 
-``--wayland-configure-bounds=<yes|no>``
+``--wayland-configure-bounds=<auto|yes|no>``
     Controls whether or not mpv opts into the configure bounds event if sent by the
-    compositor (default: yes). This restricts the initial size of the mpv window to
+    compositor (default: auto). This restricts the initial size of the mpv window to
     a certain maximum size intended by the compositor. In most cases, this simply
     just prevents the mpv window from being larger than the size of the monitor when
-    it first renders. This option will take precedence over any ``autofit`` or
-    ``geometry`` type settings if the configure bounds are used.
+    it first renders. With the default value of ``auto``, configure-bounds will
+    silently be ignored if any ``autofit`` or ``geometry`` type option is also set.
 
 ``--wayland-content-type=<auto|none|photo|video|game>``
     If supported by the compositor, mpv will send a hint using the content-type
@@ -6818,6 +6849,15 @@ Miscellaneous
     :display-resample-vdrop:  Resample audio to match the video. Drop video
                         frames to compensate for drift.
     :display-resample-desync: Like the previous mode, but no A/V compensation.
+    :display-tempo:     Same as ``display-resample``, but apply audio speed
+                        changes to audio filters instead of resampling to avoid
+                        the change in pitch. Beware that some audio filters
+                        don't do well with a speed close to 1. It is recommend
+                        to use a conditional profile to automatically switch to
+                        ``display-resample`` when speed gets too close to 1 for
+                        your filter setup. Use (speed * video_speed_correction)
+                        to get the actual playback speed in the condition.
+                        See `Conditional auto profiles`_ for details.
     :display-vdrop:     Drop or repeat video frames to compensate desyncing
                         video. (Although it should have the same effects as
                         ``audio``, the implementation is very different.)
@@ -6856,8 +6896,11 @@ Miscellaneous
     25 fps. We consider the pitch change too extreme to allow this behavior
     by default. Set this option to a value of ``5`` to enable it.
 
-    Note that in the ``--video-sync=display-resample`` mode, audio speed will
-    additionally be changed by a small amount if necessary for A/V sync. See
+    Note that ``--video-sync=display-tempo`` avoids this pitch change.
+
+    Also note that in the ``--video-sync=display-resample`` or
+    ``--video-sync=display-tempo`` mode, audio speed will additionally be
+    changed by a small amount if necessary for A/V sync. See
     ``--video-sync-max-audio-change``.
 
 ``--video-sync-max-audio-change=<value>``

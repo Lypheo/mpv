@@ -22,6 +22,7 @@ meson setup build \
     $NULL
 
 meson compile -C build
+meson test -C build
 ./build/mpv
 
 if [ ! -e "./waf" ] ; then
@@ -29,6 +30,7 @@ if [ ! -e "./waf" ] ; then
 fi
 
 python3 ./waf configure \
+    --out=build_waf \
     --enable-libmpv-shared \
     --enable-lua \
     --enable-egl-drm \

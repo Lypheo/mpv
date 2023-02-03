@@ -63,7 +63,7 @@ struct priv {
     struct spa_hook core_listener;
 
     bool muted;
-    float volume[2];
+    float volume;
 
     struct {
         int buffer_msec;
@@ -135,7 +135,6 @@ static enum spa_audio_channel mp_speaker_id_to_spa(struct ao *ao, enum mp_speake
                              return SPA_AUDIO_CHANNEL_UNKNOWN;
     };
 }
-
 
 static void on_process(void *userdata)
 {
@@ -219,7 +218,8 @@ static void on_param_changed(void *userdata, uint32_t id, const struct spa_pod *
 static void on_state_changed(void *userdata, enum pw_stream_state old, enum pw_stream_state state, const char *error)
 {
     struct ao *ao = userdata;
-    MP_DBG(ao, "Stream state changed: old_state=%d state=%d error=%s\n", old, state, error);
+    MP_DBG(ao, "Stream state changed: old_state=%s state=%s error=%s\n",
+           pw_stream_state_as_string(old), pw_stream_state_as_string(state), error);
 
     if (state == PW_STREAM_STATE_ERROR) {
         MP_WARN(ao, "Stream in error state, trying to reload...\n");
@@ -262,14 +262,8 @@ static void on_control_info(void *userdata, uint32_t id,
                 p->muted = control->values[0] >= 0.5;
             break;
         case SPA_PROP_channelVolumes:
-            if (control->n_values == 2) {
-                p->volume[0] = control->values[0];
-                p->volume[1] = control->values[1];
-            } else if (control->n_values > 0) {
-                float volume = volume_avg(control->values, control->n_values);
-                p->volume[0] = volume;
-                p->volume[1] = volume;
-            }
+            if (control->n_values > 0)
+                p->volume = volume_avg(control->values, control->n_values);
             break;
     }
 }
@@ -292,9 +286,8 @@ static void uninit(struct ao *ao)
     if (p->stream)
         pw_stream_destroy(p->stream);
     p->stream = NULL;
-    if (p->core) {
+    if (p->core)
         pw_context_destroy(pw_core_get_context(p->core));
-    }
     p->core = NULL;
     if (p->loop)
         pw_thread_loop_destroy(p->loop);
@@ -450,7 +443,7 @@ static int pipewire_init_boilerplate(struct ao *ao)
     MP_VERBOSE(ao, "Headers version: %s\n", pw_get_headers_version());
     MP_VERBOSE(ao, "Library version: %s\n", pw_get_library_version());
 
-    p->loop = pw_thread_loop_new("ao-pipewire", NULL);
+    p->loop = pw_thread_loop_new("mpv/ao/pipewire", NULL);
     if (p->loop == NULL)
         return -1;
 
@@ -468,8 +461,8 @@ static int pipewire_init_boilerplate(struct ao *ao)
             pw_properties_new(PW_KEY_REMOTE_NAME, p->options.remote, NULL),
             0);
     if (!p->core) {
-        MP_WARN(ao, "Could not connect to context '%s': %s\n",
-                p->options.remote, strerror(errno));
+        MP_VERBOSE(ao, "Could not connect to context '%s': %s\n",
+                   p->options.remote, strerror(errno));
         pw_context_destroy(context);
         goto error;
     }
@@ -490,7 +483,6 @@ error:
     pw_thread_loop_unlock(p->loop);
     return -1;
 }
-
 
 static int init(struct ao *ao)
 {
@@ -548,18 +540,13 @@ static int init(struct ao *ao)
 
     pw_thread_loop_lock(p->loop);
 
-    p->stream = pw_stream_new(
-                    p->core,
-                    "audio-src",
-                    props);
+    p->stream = pw_stream_new(p->core, "audio-src", props);
     if (p->stream == NULL) {
         pw_thread_loop_unlock(p->loop);
         goto error;
     }
 
-    pw_stream_add_listener(p->stream,
-                    &p->stream_listener,
-                    &stream_events, ao);
+    pw_stream_add_listener(p->stream, &p->stream_listener, &stream_events, ao);
 
     if (pw_stream_connect(p->stream,
                     PW_DIRECTION_OUTPUT, PW_ID_ANY,
@@ -608,9 +595,8 @@ static int control(struct ao *ao, enum aocontrol cmd, void *arg)
 
     switch (cmd) {
         case AOCONTROL_GET_VOLUME: {
-            struct ao_control_vol *vol = arg;
-            vol->left = spa_volume_to_mp_volume(p->volume[0]);
-            vol->right = spa_volume_to_mp_volume(p->volume[1]);
+            float *vol = arg;
+            *vol = spa_volume_to_mp_volume(p->volume);
             return CONTROL_OK;
         }
         case AOCONTROL_GET_MUTE: {
@@ -627,16 +613,11 @@ static int control(struct ao *ao, enum aocontrol cmd, void *arg)
             pw_thread_loop_lock(p->loop);
             switch (cmd) {
                 case AOCONTROL_SET_VOLUME: {
-                    struct ao_control_vol *vol = arg;
+                    float *vol = arg;
                     uint8_t n = ao->channels.num;
                     float values[MP_NUM_CHANNELS] = {0};
-                    if (n == 2) {
-                        values[0] = mp_volume_to_spa_volume(vol->left);
-                        values[1] = mp_volume_to_spa_volume(vol->right);
-                    } else {
-                        for (int i = 0; i < n; i++)
-                            values[i] = mp_volume_to_spa_volume(vol->left);
-                    }
+                    for (int i = 0; i < n; i++)
+                        values[i] = mp_volume_to_spa_volume(*vol);
                     ret = CONTROL_RET(pw_stream_set_control(p->stream, SPA_PROP_channelVolumes, n, values, 0));
                     break;
                }
@@ -708,7 +689,7 @@ static void hotplug_registry_global_cb(void *data, uint32_t id,
         return;
 
     pw_thread_loop_lock(priv->loop);
-    struct id_list *item = talloc_size(ao, sizeof(*item));
+    struct id_list *item = talloc(ao, struct id_list);
     item->id = id;
     spa_list_init(&item->node);
     spa_list_append(&priv->hotplug.sinks, &item->node);
@@ -731,10 +712,10 @@ static void hotplug_registry_global_remove_cb(void *data, uint32_t id)
             removed_sink = true;
             spa_list_remove(&e->node);
             talloc_free(e);
-            goto done;
+            break;
         }
     }
-done:
+
     pw_thread_loop_unlock(priv->loop);
 
     if (removed_sink)
@@ -747,7 +728,6 @@ static const struct pw_registry_events hotplug_registry_events = {
     .global_remove = hotplug_registry_global_remove_cb,
 };
 
-
 static int hotplug_init(struct ao *ao)
 {
     struct priv *priv = ao->priv;
@@ -758,13 +738,12 @@ static int hotplug_init(struct ao *ao)
 
     pw_thread_loop_lock(priv->loop);
 
-    spa_memzero(&priv->hotplug, sizeof(priv->hotplug));
+    spa_zero(priv->hotplug);
     spa_list_init(&priv->hotplug.sinks);
 
     priv->hotplug.registry = pw_core_get_registry(priv->core, PW_VERSION_REGISTRY, 0);
-    if (!priv->hotplug.registry) {
+    if (!priv->hotplug.registry)
         goto error;
-    }
 
     if (pw_registry_add_listener(priv->hotplug.registry, &priv->hotplug.registry_listener, &hotplug_registry_events, ao) < 0) {
         pw_proxy_destroy((struct pw_proxy *)priv->hotplug.registry);

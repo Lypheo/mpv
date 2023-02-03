@@ -189,12 +189,17 @@ static void free_dr_buf(void *opaque, uint8_t *data)
 }
 
 static struct mp_image *get_image(struct vo *vo, int imgfmt, int w, int h,
-                                  int stride_align)
+                                  int stride_align, int flags)
 {
     struct priv *p = vo->priv;
     pl_gpu gpu = p->gpu;
     if (!gpu->limits.thread_safe || !gpu->limits.max_mapped_size)
         return NULL;
+
+#if PL_API_VER >= 234
+    if ((flags & VO_DR_FLAG_HOST_CACHED) && !gpu->limits.host_cached)
+        return NULL;
+#endif
 
     int size = mp_image_get_alloc_size(imgfmt, w, h, stride_align);
     if (size < 0)
@@ -1552,7 +1557,7 @@ static const struct pl_hook *load_hook(struct priv *p, const char *path)
     return hook;
 }
 
-#if PL_API_VER >= 222
+#if PL_API_VER >= 222 && defined(PL_HAVE_LCMS)
 
 static stream_t *icc_open_cache(struct priv *p, uint64_t sig, int flags)
 {
@@ -1854,7 +1859,7 @@ static void update_render_options(struct vo *vo)
 #else
         MP_ERR(p, "Error diffusion dithering is not implemented.\n");
 #endif
-        // fall through
+        MP_FALLTHROUGH;
     case DITHER_ORDERED:
     case DITHER_FRUIT:
         p->params.dither_params = &p->dither;

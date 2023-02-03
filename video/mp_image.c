@@ -885,11 +885,11 @@ void mp_image_params_guess_csp(struct mp_image_params *params)
         // function, but this field can still be relevant for guiding gamut
         // mapping optimizations, and it's also used by `mp_get_csp_matrix`
         // when deciding what RGB space to map XYZ to for VOs that don't want
-        // to directly ingest XYZ into their color pipeline. BT.709 would be a
-        // sane default here, but it runs the risk of clipping any wide gamut
-        // content, so we pick BT.2020 instead to be on the safer side.
+        // to directly ingest XYZ into their color pipeline. We pick DCI-P3
+        // because it is the colorspace most closely matching digital cinema
+        // content, and also has the correct DCI whitepoint.
         if (params->color.primaries == MP_CSP_PRIM_AUTO)
-            params->color.primaries = MP_CSP_PRIM_BT_2020;
+            params->color.primaries = MP_CSP_PRIM_DCI_P3;
         if (params->color.gamma == MP_CSP_TRC_AUTO)
             params->color.gamma = MP_CSP_TRC_LINEAR;
     } else {
@@ -1102,24 +1102,21 @@ struct AVFrame *mp_image_to_av_frame(struct mp_image *src)
     dst->chroma_location = mp_chroma_location_to_av(src->params.chroma_location);
 
     dst->opaque_ref = av_buffer_alloc(sizeof(struct mp_image_params));
-    if (!dst->opaque_ref)
-        abort();
+    MP_HANDLE_OOM(dst->opaque_ref);
     *(struct mp_image_params *)dst->opaque_ref->data = src->params;
 
     if (src->icc_profile) {
         AVFrameSideData *sd =
             av_frame_new_side_data_from_buf(dst, AV_FRAME_DATA_ICC_PROFILE,
                                             new_ref->icc_profile);
-        if (!sd)
-            abort();
+        MP_HANDLE_OOM(sd);
         new_ref->icc_profile = NULL;
     }
 
     if (src->params.color.sig_peak) {
         AVContentLightMetadata *clm =
             av_content_light_metadata_create_side_data(dst);
-        if (!clm)
-            abort();
+        MP_HANDLE_OOM(clm);
         clm->MaxCLL = src->params.color.sig_peak * MP_REF_WHITE;
     }
 
@@ -1130,8 +1127,7 @@ struct AVFrame *mp_image_to_av_frame(struct mp_image *src)
         if (!av_frame_get_side_data(dst, mpsd->type)) {
             AVFrameSideData *sd = av_frame_new_side_data_from_buf(dst, mpsd->type,
                                                                   mpsd->buf);
-            if (!sd)
-                abort();
+            MP_HANDLE_OOM(sd);
             mpsd->buf = NULL;
         }
     }

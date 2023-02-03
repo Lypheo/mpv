@@ -1,5 +1,5 @@
 /*
- * This file is part of mpv video player.
+ * This file is part of mpv.
  *
  * mpv is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Lesser General Public
@@ -15,29 +15,15 @@
  * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#include "video/out/wayland_common.h"
-#include "video/out/opengl/context.h"
-#include "ra_wldmabuf.h"
+#include <libmpv/client.h>
 
-static void uninit(struct ra_ctx *ctx)
+int main(void)
 {
-    ra_free(&ctx->ra);
-    vo_wayland_uninit(ctx->vo);
+    mpv_handle *handle = mpv_create();
+    if (!handle)
+        return 1;
+    if (mpv_initialize(handle))
+        return 1;
+    mpv_destroy(handle);
+    return 0;
 }
-
-static bool init(struct ra_ctx *ctx)
-{
-    if (!vo_wayland_init(ctx->vo))
-        return false;
-    ctx->ra = ra_create_wayland(ctx->log, ctx->vo->wl->display);
-
-    return true;
-}
-
-const struct ra_ctx_fns ra_ctx_wldmabuf = {
-    .type               = "none",
-    .name               = "wldmabuf",
-    .hidden             = true,
-    .init               = init,
-    .uninit             = uninit,
-};

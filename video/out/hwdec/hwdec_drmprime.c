@@ -47,6 +47,7 @@ static void uninit(struct ra_hwdec *hw)
     struct priv_owner *p = hw->priv;
     if (p->hwctx.driver_name)
         hwdec_devices_remove(hw->devs, &p->hwctx);
+    av_buffer_unref(&p->hwctx.av_device_ref);
 }
 
 const static dmabuf_interop_init interop_inits[] = {
@@ -92,7 +93,7 @@ static int init(struct ra_hwdec *hw)
      */
     void *tmp = talloc_new(NULL);
     struct drm_opts *drm_opts = mp_get_config_group(tmp, hw->global, &drm_conf);
-    const char *opt_path = drm_opts->drm_device_path;
+    const char *opt_path = drm_opts->device_path;
 
     const char *device_path = params && params->render_fd > -1 ?
                               drmGetRenderDeviceNameFromFd(params->render_fd) :

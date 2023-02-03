@@ -91,6 +91,7 @@ struct demux_opts {
     int64_t max_bytes_bw;
     int donate_fw;
     double min_secs;
+    double hyst_secs;
     int force_seekable;
     double min_secs_cache;
     int access_references;
@@ -115,6 +116,7 @@ const struct m_sub_options demux_conf = {
             {"no", 0}, {"auto", -1}, {"yes", 1})},
         {"cache-on-disk", OPT_FLAG(disk_cache)},
         {"demuxer-readahead-secs", OPT_DOUBLE(min_secs), M_RANGE(0, DBL_MAX)},
+        {"demuxer-hysteresis-secs", OPT_DOUBLE(hyst_secs), M_RANGE(0, DBL_MAX)},
         {"demuxer-max-bytes", OPT_BYTE_SIZE(max_bytes),
             M_RANGE(0, M_MAX_MEM_BYTES)},
         {"demuxer-max-back-bytes", OPT_BYTE_SIZE(max_bytes_bw),
@@ -210,6 +212,8 @@ struct demux_internal {
     bool warned_queue_overflow;
     bool eof;                   // whether we're in EOF state
     double min_secs;
+    double hyst_secs;           // stop reading till there's hyst_secs remaining
+    bool hyst_active;
     size_t max_bytes;
     size_t max_bytes_bw;
     bool seekable_cache;
@@ -2205,8 +2209,12 @@ static bool read_packet(struct demux_internal *in)
         if (ds->eager && ds->queue->last_ts != MP_NOPTS_VALUE &&
             in->min_secs > 0 && ds->base_ts != MP_NOPTS_VALUE &&
             ds->queue->last_ts >= ds->base_ts &&
-            !in->back_demuxing)
-            prefetch_more |= ds->queue->last_ts - ds->base_ts < in->min_secs;
+            !in->back_demuxing) {
+            if (ds->queue->last_ts - ds->base_ts <= in->hyst_secs)
+                in->hyst_active = false;
+            if (!in->hyst_active)
+                prefetch_more |= ds->queue->last_ts - ds->base_ts < in->min_secs;
+        }
         total_fw_bytes += get_foward_buffered_bytes(ds);
     }
 
@@ -2214,8 +2222,10 @@ static bool read_packet(struct demux_internal *in)
              (size_t)total_fw_bytes, read_more, prefetch_more, refresh_more);
     if (total_fw_bytes >= in->max_bytes) {
         // if we hit the limit just by prefetching, simply stop prefetching
-        if (!read_more)
+        if (!read_more) {
+            in->hyst_active = !!in->hyst_secs;
             return false;
+        }
         if (!in->warned_queue_overflow) {
             in->warned_queue_overflow = true;
             MP_WARN(in, "Too many packets in the demuxer packet queues:\n");
@@ -2415,10 +2425,6 @@ static void execute_trackswitch(struct demux_internal *in)
 {
     in->tracks_switched = false;
 
-    bool any_selected = false;
-    for (int n = 0; n < in->num_streams; n++)
-        any_selected |= in->streams[n]->ds->selected;
-
     pthread_mutex_unlock(&in->lock);
 
     if (in->d_thread->desc->switched_tracks)
@@ -2466,6 +2472,7 @@ static void update_opts(struct demux_internal *in)
     struct demux_opts *opts = in->opts;
 
     in->min_secs = opts->min_secs;
+    in->hyst_secs = opts->hyst_secs;
     in->max_bytes = opts->max_bytes;
     in->max_bytes_bw = opts->max_bytes_bw;
 
@@ -2647,8 +2654,7 @@ static int dequeue_packet(struct demux_stream *ds, double min_pts,
             return -1;
         ds->attached_picture_added = true;
         struct demux_packet *pkt = demux_copy_packet(ds->sh->attached_picture);
-        if (!pkt)
-            abort();
+        MP_HANDLE_OOM(pkt);
         pkt->stream = ds->sh->index;
         *res = pkt;
         return 1;
@@ -2860,7 +2866,7 @@ static const char *d_level(enum demux_check level)
     case DEMUX_CHECK_REQUEST:return "request";
     case DEMUX_CHECK_NORMAL: return "normal";
     }
-    abort();
+    MP_ASSERT_UNREACHABLE();
 }
 
 static int decode_float(char *str, float *out)
@@ -2954,6 +2960,11 @@ static struct replaygain_data *decode_rgain(struct mp_log *log,
         }
         rg.track_gain /= 256.;
         rg.album_gain /= 256.;
+
+        // Add 5dB to compensate for the different reference levels between
+        // our reference of ReplayGain 2 (-18 LUFS) and EBU R128 (-23 LUFS).
+        rg.track_gain += 5.;
+        rg.album_gain += 5.;
         return talloc_dup(NULL, &rg);
     }
 
