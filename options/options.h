@@ -110,6 +110,7 @@ struct mp_subtitle_opts {
     bool sub_clear_on_seek;
     int teletext_page;
     bool sub_past_video_end;
+    bool sub_past_borders;
 };
 
 struct mp_sub_filter_opts {
