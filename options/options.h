@@ -109,6 +109,7 @@ struct mp_subtitle_opts {
     int sub_clear_on_seek;
     int teletext_page;
     int sub_past_video_end;
+    int sub_past_borders;
 };
 
 struct mp_sub_filter_opts {
