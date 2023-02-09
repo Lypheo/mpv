@@ -340,6 +340,7 @@ const struct m_sub_options mp_subtitle_sub_opts = {
         {"sub-lavc-o", OPT_KEYVALUELIST(sub_avopts), .flags = UPDATE_SUB_HARD},
         {"sub-glyph-limit", OPT_INT(sub_glyph_limit)},
         {"sub-bitmap-max-size", OPT_INT(sub_bitmap_max_size)},
+        {"sub-past-borders", OPT_BOOL(sub_past_borders)},
         {0}
     },
     .size = sizeof(OPT_BASE_STRUCT),
