@@ -1846,10 +1846,10 @@ Audio
     Enable exclusive output mode. In this mode, the system is usually locked
     out, and only mpv will be able to output audio.
 
-    This only works for some audio outputs, such as ``wasapi`` and
-    ``coreaudio``. Other audio outputs silently ignore this options. They either
-    have no concept of exclusive mode, or the mpv side of the implementation is
-    missing.
+    This only works for some audio outputs, such as ``wasapi``, ``coreaudio``
+    and ``pipewire``. Other audio outputs silently ignore this option.
+    They either have no concept of exclusive mode, or the mpv side of the
+    implementation is missing.
 
 ``--audio-fallback-to-null=<yes|no>``
     If no audio device can be opened, behave as if ``--ao=null`` was given. This
@@ -2904,6 +2904,15 @@ Subtitles
     name does not match, it may prefer not to render any text that uses the
     missing font.)
 
+``--sub-fonts-dir=<path>``
+    Font files in this directory are used by mpv/libass for subtitles. Useful
+    if you do not want to install fonts to your system. Note that files in this
+    directory are loaded into memory before being used by mpv. If you have a
+    lot of fonts, consider using fonts.conf (see `FILES`_ section) to include
+    additional mpv user settings.
+
+    If this option is not specified, ``~~/fonts`` will be used by default.
+
 Window
 ------
 
@@ -3225,9 +3234,9 @@ Window
     ``--window-minimized`` for further remarks.
 
 ``--cursor-autohide=<number|no|always>``
-    Make mouse cursor automatically hide after given number of milliseconds.
-    ``no`` will disable cursor autohide. ``always`` means the cursor will stay
-    hidden.
+    Make mouse cursor automatically hide after given number of milliseconds
+    (default: 1000 ms). ``no`` will disable cursor autohide. ``always``
+    means the cursor will stay hidden.
 
 ``--cursor-autohide-fs-only``
     If this option is given, the cursor is always visible in windowed mode. In
@@ -3257,6 +3266,13 @@ Window
     there is a change in video parameters, video stream or file. This used to
     be the default behavior. Currently only affects X11 VOs.
 
+``--auto-window-resize=<yes|no>``
+    (Wayland, Win32, and X11)
+    By default, mpv will automatically resize itself if the video's size changes
+    (i.e. advancing forward in a playlist). Setting this to ``no`` disables this
+    behavior so the window size never changes automatically. This option does
+    not have any impact on the ``--autofit`` or ``--geometry`` options.
+
 ``--no-keepaspect``, ``--keepaspect``
     ``--no-keepaspect`` will always stretch the video to window size, and will
     disable the window manager hints that force the window aspect ratio.
@@ -3285,8 +3301,7 @@ Window
     (macOS, Windows, X11, and Wayland only)
     Scale the window size according to the backing scale factor (default: yes).
     On regular HiDPI resolutions the window opens with double the size but appears
-    as having the same size as on non-HiDPI resolutions. This is enabled by
-    default on macOS.
+    as having the same size as on non-HiDPI resolutions.
 
 ``--native-fs``, ``--no-native-fs``
     (macOS only)
@@ -4256,6 +4271,9 @@ OSD
     See ``--sub-font-provider`` for details and accepted values. Note that
     unlike subtitles, OSD never uses embedded fonts from media files.
 
+``--osd-fonts-dir=<path>``
+    See ``--sub-fonts-dir`` for details.  Defaults to ``~~/fonts``.
+
 Screenshot
 ----------
 
@@ -4275,7 +4293,7 @@ Screenshot
 
     Note that not all formats are supported.
 
-    Default: ``no``.
+    Default: ``yes``.
 
 ``--screenshot-high-bit-depth=<yes|no>``
     If possible, write screenshots with a bit depth similar to the source
@@ -4422,7 +4440,7 @@ Screenshot
 
 ``--screenshot-jxl-effort=<1-9>``
     Set the JPEG XL compression effort. Higher effort (usually) means better
-    compression, but takes more CPU time. The default is 3.
+    compression, but takes more CPU time. The default is 4.
 
 ``--screenshot-sw=<yes|no>``
     Whether to use software rendering for screenshots (default: no).
@@ -6183,7 +6201,7 @@ them.
     d3d11
         Win32, with native Direct3D 11 rendering.
     x11
-        X11/GLX
+        X11/GLX (deprecated/legacy, EGL is preferred these days)
     x11vk
         VK_KHR_xlib_surface
     wayland
@@ -6442,6 +6460,15 @@ them.
         HDR<->SDR mapping specified in ITU-R Report BT.2446, method A. This is
         the recommended curve for well-mastered content. (``--vo=gpu-next``
         only)
+    st2094-40
+        Dynamic HDR10+ tone-mapping method specified in SMPTE ST2094-40 Annex
+        B. In the absence of metadata, falls back to a fixed spline matched to
+        the input/output average brightness characteristics. (``--vo=gpu-next``
+        only)
+    st2094-10
+        Dynamic tone-mapping method specified in SMPTE ST2094-10 Annex B.2.
+        Conceptually simpler than ST2094-40, and generally produces worse
+        results.
 
 ``--tone-mapping-param=<value>``
     Set tone mapping parameters. By default, this is set to the special string
@@ -6472,6 +6499,8 @@ them.
         Specifies the scale factor to use while stretching. Defaults to 1.0.
     spline
         Specifies the knee point (in PQ space). Defaults to 0.30.
+    st2094-10
+        Specifies the contrast (slope) at the knee point. Defaults to 1.0.
 
 ``--inverse-tone-mapping``
     If set, allows inverse tone mapping (expanding SDR to HDR). Not supported
@@ -6512,6 +6541,16 @@ them.
         Luminance-based method from ITU-R BT.2446a, including fixed gamut
         reductions to account for brightness-related perceptual nonuniformity.
         (``--vo=gpu-next`` only)
+
+``--tone-mapping-visualize``
+    Display a (PQ-PQ) graph of the active tone-mapping LUT. Intended only for
+    debugging purposes. The X axis shows PQ input values, the Y axis shows PQ
+    output values. The tone-mapping curve is shown in green/yellow. Yellow
+    means the brightness has been boosted from the source, dark blue regions
+    show where the brightness has been reduced. The extra colored regions and
+    lines indicate various monitor limits, as well a reference diagonal
+    (neutral tone-mapping) and source scene average brightness information (if
+    available). (``--vo=gpu-next`` only)
 
 ``--gamut-mapping-mode``
     Specifies the algorithm used for reducing the gamut of images for the
@@ -6881,9 +6920,6 @@ Miscellaneous
     See ``--interpolation-threshold`` for how this option affects
     interpolation.
 
-    This is mostly for testing, and the option may be randomly changed in the
-    future without notice.
-
 ``--video-sync-max-video-change=<value>``
     Maximum speed difference in percent that is applied to video with
     ``--video-sync=display-...`` (default: 1). Display sync mode will be
@@ -7130,21 +7166,3 @@ Miscellaneous
     code is the same.)
 
     Conversion is not applied to metadata that is updated at runtime.
-
-
-Debugging
----------
-
-``--unittest=<name>``
-    Run an internal unit test. There are multiple, and the name specifies which.
-
-    The special value ``all-simple`` runs all tests which do not need further
-    setup (other arguments and such). Some tests may need additional arguments
-    to do anything useful.
-
-    On success, the player binary exits with exit status 0, otherwise it returns
-    with an undefined non-0 exit status (it may crash or abort itself on test
-    failures).
-
-    This is only enabled if built with ``--enable-tests``, and should normally
-    be enabled and used by developers only.

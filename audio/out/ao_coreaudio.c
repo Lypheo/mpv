@@ -17,7 +17,6 @@
 
 #include <CoreAudio/HostTime.h>
 
-#include "config.h"
 #include "ao.h"
 #include "internal.h"
 #include "audio/format.h"
@@ -37,7 +36,7 @@ struct priv {
     AudioStreamBasicDescription original_asbd;
     AudioStreamID original_asbd_stream;
 
-    int change_physical_format;
+    bool change_physical_format;
 };
 
 static int64_t ca_get_hardware_latency(struct ao *ao) {
@@ -422,7 +421,7 @@ const struct ao_driver audio_out_coreaudio = {
     .list_devs      = ca_get_device_list,
     .priv_size      = sizeof(struct priv),
     .options = (const struct m_option[]){
-        {"change-physical-format", OPT_FLAG(change_physical_format)},
+        {"change-physical-format", OPT_BOOL(change_physical_format)},
         {0}
     },
     .options_prefix = "coreaudio",

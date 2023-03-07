@@ -43,17 +43,16 @@
 
 const struct image_writer_opts image_writer_opts_defaults = {
     .format = AV_CODEC_ID_MJPEG,
-    .high_bit_depth = 1,
+    .high_bit_depth = true,
     .png_compression = 7,
     .png_filter = 5,
     .jpeg_quality = 90,
-    .jpeg_source_chroma = 1,
-    .webp_lossless = 0,
+    .jpeg_source_chroma = true,
     .webp_quality = 75,
     .webp_compression = 4,
     .jxl_distance = 1.0,
-    .jxl_effort = 3,
-    .tag_csp = 0,
+    .jxl_effort = 4,
+    .tag_csp = true,
 };
 
 const struct m_opt_choice_alternatives mp_image_writer_formats[] = {
@@ -72,18 +71,18 @@ const struct m_opt_choice_alternatives mp_image_writer_formats[] = {
 const struct m_option image_writer_opts[] = {
     {"format", OPT_CHOICE_C(format, mp_image_writer_formats)},
     {"jpeg-quality", OPT_INT(jpeg_quality), M_RANGE(0, 100)},
-    {"jpeg-source-chroma", OPT_FLAG(jpeg_source_chroma)},
+    {"jpeg-source-chroma", OPT_BOOL(jpeg_source_chroma)},
     {"png-compression", OPT_INT(png_compression), M_RANGE(0, 9)},
     {"png-filter", OPT_INT(png_filter), M_RANGE(0, 5)},
-    {"webp-lossless", OPT_FLAG(webp_lossless)},
+    {"webp-lossless", OPT_BOOL(webp_lossless)},
     {"webp-quality", OPT_INT(webp_quality), M_RANGE(0, 100)},
     {"webp-compression", OPT_INT(webp_compression), M_RANGE(0, 6)},
 #if HAVE_JPEGXL
     {"jxl-distance", OPT_DOUBLE(jxl_distance), M_RANGE(0.0, 15.0)},
     {"jxl-effort", OPT_INT(jxl_effort), M_RANGE(1, 9)},
 #endif
-    {"high-bit-depth", OPT_FLAG(high_bit_depth)},
-    {"tag-colorspace", OPT_FLAG(tag_csp)},
+    {"high-bit-depth", OPT_BOOL(high_bit_depth)},
+    {"tag-colorspace", OPT_BOOL(tag_csp)},
     {0},
 };
 
@@ -332,6 +331,19 @@ bool image_writer_high_depth(const struct image_writer_opts *opts)
     ;
 }
 
+bool image_writer_flexible_csp(const struct image_writer_opts *opts)
+{
+    return false
+#if HAVE_JPEGXL
+        || opts->format == AV_CODEC_ID_JPEGXL
+#endif
+#if LIBAVCODEC_VERSION_INT >= AV_VERSION_INT(59, 58, 100)
+        // This version added support for cICP tag writing
+        || opts->format == AV_CODEC_ID_PNG
+#endif
+    ;
+}
+
 int image_writer_format_from_ext(const char *ext)
 {
     for (int n = 0; mp_image_writer_formats[n].name; n++) {
@@ -343,6 +355,7 @@ int image_writer_format_from_ext(const char *ext)
 
 static struct mp_image *convert_image(struct mp_image *image, int destfmt,
                                       enum mp_csp_levels yuv_levels,
+                                      const struct image_writer_opts *opts,
                                       struct mpv_global *global,
                                       struct mp_log *log)
 {
@@ -359,13 +372,17 @@ static struct mp_image *convert_image(struct mp_image *image, int destfmt,
     };
     mp_image_params_guess_csp(&p);
 
-    // If RGB, just assume everything is correct.
-    if (p.color.space != MP_CSP_RGB) {
-        // Currently, assume what FFmpeg's jpg encoder or libwebp needs.
-        // Of course this works only for non-HDR (no HDR support in libswscale).
-        p.color.levels = yuv_levels;
-        p.color.space = MP_CSP_BT_601;
-        p.chroma_location = MP_CHROMA_CENTER;
+    if (!image_writer_flexible_csp(opts)) {
+        // Formats that don't support non-sRGB csps should be forced to sRGB
+        p.color.primaries = MP_CSP_PRIM_BT_709;
+        p.color.gamma = MP_CSP_TRC_SRGB;
+        p.color.light = MP_CSP_LIGHT_DISPLAY;
+        p.color.sig_peak = 0;
+        if (p.color.space != MP_CSP_RGB) {
+            p.color.levels = yuv_levels;
+            p.color.space = MP_CSP_BT_601;
+            p.chroma_location = MP_CHROMA_CENTER;
+        }
         mp_image_params_guess_csp(&p);
     }
 
@@ -432,7 +449,7 @@ bool write_image(struct mp_image *image, const struct image_writer_opts *opts,
         levels = MP_CSP_LEVELS_PC;
     }
 
-    struct mp_image *dst = convert_image(image, destfmt, levels, global, log);
+    struct mp_image *dst = convert_image(image, destfmt, levels, opts, global, log);
     if (!dst)
         return false;
 

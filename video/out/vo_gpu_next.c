@@ -147,9 +147,9 @@ struct priv {
     // Performance data of last frame
     struct voctrl_performance_data perf;
 
-    int delayed_peak;
-    int inter_preserve;
-    int target_hint;
+    bool delayed_peak;
+    bool inter_preserve;
+    bool target_hint;
 };
 
 static void update_render_options(struct vo *vo);
@@ -422,6 +422,19 @@ static int plane_data_from_imgfmt(struct pl_plane_data out_data[4],
     return desc.num_planes;
 }
 
+#ifdef PL_HAVE_LAV_HDR
+static inline void *get_side_data(const struct mp_image *mpi,
+                                  enum AVFrameSideDataType type)
+{
+    for (int i = 0; i <mpi->num_ff_side_data; i++) {
+        if (mpi->ff_side_data[i].type == type)
+            return (void *) mpi->ff_side_data[i].buf->data;
+    }
+
+    return NULL;
+}
+#endif
+
 static struct pl_color_space get_mpi_csp(struct vo *vo, struct mp_image *mpi)
 {
     struct pl_color_space csp = {
@@ -430,6 +443,13 @@ static struct pl_color_space get_mpi_csp(struct vo *vo, struct mp_image *mpi)
         .hdr.max_luma = mpi->params.color.sig_peak * MP_REF_WHITE,
     };
 
+#ifdef PL_HAVE_LAV_HDR
+    pl_map_hdr_metadata(&csp.hdr, &(struct pl_av_hdr_metadata) {
+        .mdm = get_side_data(mpi, AV_FRAME_DATA_MASTERING_DISPLAY_METADATA),
+        .clm = get_side_data(mpi, AV_FRAME_DATA_CONTENT_LIGHT_LEVEL),
+        .dhp = get_side_data(mpi, AV_FRAME_DATA_DYNAMIC_HDR_PLUS),
+    });
+#else // back-compat fallback for older libplacebo
     for (int i = 0; i < mpi->num_ff_side_data; i++) {
         void *data = mpi->ff_side_data[i].buf->data;
         switch (mpi->ff_side_data[i].type) {
@@ -461,6 +481,7 @@ static struct pl_color_space get_mpi_csp(struct vo *vo, struct mp_image *mpi)
         default: break;
         }
     }
+#endif // PL_HAVE_LAV_HDR
 
     return csp;
 }
@@ -680,22 +701,8 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex, const struct pl_source_frame *src
     // Update chroma location, must be done after initializing planes
     pl_frame_set_chroma_location(frame, mp_chroma_to_pl(par->chroma_location));
 
-#ifdef PL_HAVE_LAV_DOLBY_VISION
-    if (mpi->dovi) {
-        const AVDOVIMetadata *metadata = (AVDOVIMetadata *) mpi->dovi->data;
-        struct pl_dovi_metadata *dovi = talloc_ptrtype(mpi, dovi);
-        const AVDOVIColorMetadata *color = av_dovi_get_color(metadata);
-        pl_map_dovi_metadata(dovi, metadata);
-        frame->repr.dovi = dovi;
-        frame->repr.sys = PL_COLOR_SYSTEM_DOLBYVISION;
-        frame->color.primaries = PL_COLOR_PRIM_BT_2020;
-        frame->color.transfer = PL_COLOR_TRC_PQ;
-        frame->color.hdr.min_luma =
-            pl_hdr_rescale(PL_HDR_PQ, PL_HDR_NITS, color->source_min_pq / 4095.0f);
-        frame->color.hdr.max_luma =
-            pl_hdr_rescale(PL_HDR_PQ, PL_HDR_NITS, color->source_max_pq / 4095.0f);
-    }
-#endif
+    // Set the frame DOVI metadata
+    mp_map_dovi_metadata_to_pl(mpi, frame);
 
 #ifdef PL_HAVE_LAV_FILM_GRAIN
     if (mpi->film_grain)
@@ -814,7 +821,8 @@ static void apply_target_options(struct priv *p, struct pl_frame *target)
         target->color.primaries = mp_prim_to_pl(opts->target_prim);
     if (opts->target_trc)
         target->color.transfer = mp_trc_to_pl(opts->target_trc);
-    if (opts->target_peak)
+    // If swapchain returned a value use this, override is used in hint
+    if (opts->target_peak && !target->color.hdr.max_luma)
         target->color.hdr.max_luma = opts->target_peak;
     if (opts->dither_depth > 0) {
         struct pl_bit_encoding *tbits = &target->repr.bits;
@@ -890,6 +898,8 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
             hint.primaries = mp_prim_to_pl(opts->target_prim);
         if (opts->target_trc)
             hint.transfer = mp_trc_to_pl(opts->target_trc);
+        if (opts->target_peak)
+            hint.hdr.max_luma = opts->target_peak;
         pl_swapchain_colorspace_hint(p->sw, &hint);
     } else if (!p->target_hint) {
         pl_swapchain_colorspace_hint(p->sw, NULL);
@@ -1005,8 +1015,13 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
     p->params.skip_caching_single_frame = !cache_frame;
 #endif
     p->params.preserve_mixing_cache = p->inter_preserve && !frame->still;
-    p->params.allow_delayed_peak_detect = p->delayed_peak;
     p->params.frame_mixer = frame->still ? NULL : p->frame_mixer;
+
+#if PL_API_VER >= 254
+    p->peak_detect.allow_delayed = p->delayed_peak;
+#else
+    p->params.allow_delayed_peak_detect = p->delayed_peak;
+#endif
 
     // Render frame
     if (!pl_render_image_mix(p->rr, &mix, &target, &p->params)) {
@@ -1135,8 +1150,13 @@ static void video_screenshot(struct vo *vo, struct voctrl_screenshot *args)
     p->params.info_callback = NULL;
     p->params.skip_caching_single_frame = true;
     p->params.preserve_mixing_cache = false;
-    p->params.allow_delayed_peak_detect = false;
     p->params.frame_mixer = NULL;
+
+#if PL_API_VER >= 254
+    p->peak_detect.allow_delayed = false;
+#else
+    p->params.allow_delayed_peak_detect = false;
+#endif
 
     // Retrieve the current frame from the frame queue
     struct pl_frame_mix mix;
@@ -1198,6 +1218,7 @@ static void video_screenshot(struct vo *vo, struct voctrl_screenshot *args)
     }
 
     struct pl_frame target = {
+        .repr = pl_color_repr_rgb,
         .num_planes = 1,
         .planes[0] = {
             .texture = fbo,
@@ -1206,7 +1227,15 @@ static void video_screenshot(struct vo *vo, struct voctrl_screenshot *args)
         },
     };
 
-    apply_target_options(p, &target);
+    if (args->scaled) {
+        // Apply target LUT, ICC profile and CSP override only in window mode
+        apply_target_options(p, &target);
+    } else if (args->native_csp) {
+        target.color = image.color;
+    } else {
+        target.color = pl_color_space_srgb;
+    }
+
     apply_crop(&image, src, mpi->params.w, mpi->params.h);
     apply_crop(&target, dst, fbo->params.w, fbo->params.h);
 
@@ -1227,6 +1256,13 @@ static void video_screenshot(struct vo *vo, struct voctrl_screenshot *args)
     args->res = mp_image_alloc(mpfmt, fbo->params.w, fbo->params.h);
     if (!args->res)
         goto done;
+
+    args->res->params.color.primaries = mp_prim_from_pl(target.color.primaries);
+    args->res->params.color.gamma = mp_trc_from_pl(target.color.transfer);
+    args->res->params.color.levels = mp_levels_from_pl(target.repr.levels);
+    args->res->params.color.sig_peak = target.color.hdr.max_luma / MP_REF_WHITE;
+    if (args->scaled)
+        args->res->params.p_w = args->res->params.p_h = 1;
 
     bool ok = pl_tex_download(gpu, pl_tex_transfer_params(
         .tex = fbo,
@@ -1816,6 +1852,10 @@ static void update_render_options(struct vo *vo)
         [TONE_MAPPING_SPLINE]   = &pl_tone_map_spline,
         [TONE_MAPPING_BT_2390]  = &pl_tone_map_bt2390,
         [TONE_MAPPING_BT_2446A] = &pl_tone_map_bt2446a,
+#if PL_API_VER >= 246
+        [TONE_MAPPING_ST2094_40] = &pl_tone_map_st2094_40,
+        [TONE_MAPPING_ST2094_10] = &pl_tone_map_st2094_10,
+#endif
     };
 
     static const enum pl_gamut_mode gamut_modes[] = {
@@ -1844,6 +1884,9 @@ static void update_render_options(struct vo *vo)
         p->color_map.tone_mapping_param = 0.0;
     if (opts->tone_map.gamut_mode != GAMUT_AUTO)
         p->color_map.gamut_mode = gamut_modes[opts->tone_map.gamut_mode];
+#if PL_API_VER >= 247
+    p->color_map.visualize_lut = opts->tone_map.visualize;
+#endif
 
     switch (opts->dither_algo) {
     case DITHER_NONE:
@@ -1924,14 +1967,14 @@ const struct vo_driver video_out_gpu_next = {
     },
 
     .options = (const struct m_option[]) {
-        {"allow-delayed-peak-detect", OPT_FLAG(delayed_peak)},
-        {"interpolation-preserve", OPT_FLAG(inter_preserve)},
+        {"allow-delayed-peak-detect", OPT_BOOL(delayed_peak)},
+        {"interpolation-preserve", OPT_BOOL(inter_preserve)},
         {"lut", OPT_STRING(lut.opt), .flags = M_OPT_FILE},
         {"lut-type", OPT_CHOICE_C(lut.type, lut_types)},
         {"image-lut", OPT_STRING(image_lut.opt), .flags = M_OPT_FILE},
         {"image-lut-type", OPT_CHOICE_C(image_lut.type, lut_types)},
         {"target-lut", OPT_STRING(target_lut.opt), .flags = M_OPT_FILE},
-        {"target-colorspace-hint", OPT_FLAG(target_hint)},
+        {"target-colorspace-hint", OPT_BOOL(target_hint)},
         // No `target-lut-type` because we don't support non-RGB targets
         {0}
     },

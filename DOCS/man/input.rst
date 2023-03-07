@@ -2678,8 +2678,6 @@ Property list
     stripped. If the subtitle is not text-based (i.e. DVD/BD subtitles), an
     empty string is returned.
 
-    This property is experimental and might be removed in the future.
-
 ``sub-text-ass``
     Like ``sub-text``, but return the text in ASS format. Text subtitles in
     other formats are converted. For native ASS subtitles, events that do
@@ -2690,8 +2688,6 @@ Property list
     This property is not enough to render ASS subtitles correctly, because ASS
     header and per-event metadata are not returned. You likely need to do
     further filtering on the returned string to make it useful.
-
-    This property is experimental and might be removed in the future.
 
 ``secondary-sub-text``
     Same as ``sub-text``, but for the secondary subtitles.
@@ -2793,9 +2789,10 @@ Property list
         entry, ``no``/false or unavailable otherwise.
 
     ``playlist/N/title``
-        Name of the Nth entry. Only available if the playlist file contains
-        such fields, and only if mpv's parser supports it for the given
-        playlist format.
+        Name of the Nth entry. Available if the playlist file contains
+        such fields and mpv's parser supports it for the given
+        playlist format, or if the playlist entry has been opened before and a
+        media-title other then then filename has been aquired.
 
     ``playlist/N/id``
         Unique ID for this entry. This is an automatically assigned integer ID
@@ -3343,6 +3340,12 @@ Property list
     The value of ``ass_library_version()``. This is an integer, encoded in a
     somewhat weird form (apparently "hex BCD"), indicating the release version
     of the libass library linked to mpv.
+
+``platform``
+    Returns a string describing what target platform mpv was built for. The value
+    of this is dependent on what the underlying build system detects. Some of the
+    most common values are: ``windows``, ``darwin`` (macos or ios), ``linux``,
+    ``android``, and ``freebsd``. Note that this is not a complete listing.
 
 ``options/<name>`` (RW)
     The value of option ``--<name>``. Most options can be changed at runtime by

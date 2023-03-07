@@ -22,10 +22,16 @@
 #include "input/event.h"
 #include "vo.h"
 
+typedef struct {
+    uint32_t format;
+    uint32_t padding;
+    uint64_t modifier;
+} wayland_format;
+
 struct wayland_opts {
     int configure_bounds;
     int content_type;
-    int disable_vsync;
+    bool disable_vsync;
     int edge_pixels_pointer;
     int edge_pixels_touch;
 };
@@ -44,6 +50,7 @@ struct vo_wayland_state {
     struct wl_shm           *shm;
     struct wl_surface       *surface;
     struct wl_surface       *video_surface;
+    struct wl_surface       *callback_surface;
     struct wl_subsurface    *video_subsurface;
 
     /* Geometry */
@@ -96,8 +103,13 @@ struct vo_wayland_state {
     struct zwp_linux_dmabuf_v1 *dmabuf;
     /* TODO: unvoid this if required wayland protocols is bumped to 1.24+ */
     void *dmabuf_feedback;
-    void *format_map;
+    wayland_format *format_map;
     uint32_t format_size;
+    bool using_dmabuf_wayland;
+    /* TODO: remove these once zwp_linux_dmabuf_v1 version 2 support is removed. */
+    int *drm_formats;
+    int drm_format_ct;
+    int drm_format_ct_max;
 
     /* presentation-time */
     struct wp_presentation  *presentation;
@@ -156,13 +168,12 @@ struct vo_wayland_state {
 bool vo_wayland_check_visible(struct vo *vo);
 bool vo_wayland_init(struct vo *vo);
 bool vo_wayland_reconfig(struct vo *vo);
-bool vo_wayland_supported_format(struct vo *vo, uint32_t format, uint64_t modifier);
 
 int vo_wayland_allocate_memfd(struct vo *vo, size_t size);
 int vo_wayland_control(struct vo *vo, int *events, int request, void *arg);
 
 void vo_wayland_handle_fractional_scale(struct vo_wayland_state *wl);
-void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, int alpha);
+void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, bool alpha);
 void vo_wayland_sync_swap(struct vo_wayland_state *wl);
 void vo_wayland_uninit(struct vo *vo);
 void vo_wayland_wait_events(struct vo *vo, int64_t until_time_us);

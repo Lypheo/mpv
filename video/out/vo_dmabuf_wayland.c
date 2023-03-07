@@ -39,6 +39,7 @@
 #include "present_sync.h"
 #include "wayland_common.h"
 #include "wlbuf_pool.h"
+#include "wldmabuf/ra_wldmabuf.h"
 
 // Generated from wayland-protocols
 #include "generated/wayland/linux-dmabuf-unstable-v1.h"
@@ -59,7 +60,7 @@ struct priv {
     struct wl_buffer *solid_buffer;
     struct wlbuf_pool *wlbuf_pool;
     bool want_reset;
-    uint64_t reset_count;
+    bool want_resize;
     struct mp_rect src;
     bool resized;
 
@@ -101,10 +102,13 @@ static bool vaapi_dmabuf_importer(struct mp_image *src, struct wlbuf_pool_entry*
     }
     bool success = false;
     uint32_t drm_format = desc.layers[layer_no].drm_format;
-    if (!vo_wayland_supported_format(entry->vo, drm_format, desc.objects[0].drm_format_modifier)) {
-        MP_VERBOSE(entry->vo, "%s(%016lx) is not supported.\n",
-                   mp_tag_str(drm_format), desc.objects[0].drm_format_modifier);
-        goto done;
+    if (!ra_compatible_format(p->ctx->ra, drm_format, desc.objects[0].drm_format_modifier)) {
+            MP_VERBOSE(entry->vo, "Surface with format %s; drm format '%s(%016lx)' is "
+                                  "not supported by compositor.\n",
+                                   mp_imgfmt_to_name(src->params.hw_subfmt),
+                                   mp_tag_str(drm_format),
+                                   desc.objects[0].drm_format_modifier);
+            goto done;
     }
     entry->drm_format = drm_format;
     for (int plane_no = 0; plane_no < desc.layers[layer_no].num_planes; ++plane_no) {
@@ -168,7 +172,6 @@ static void set_viewport_source(struct vo *vo, struct mp_rect src) {
                                mp_rect_h(src) << 8);
         // 2. reset buffer pool
         p->want_reset = true;
-        p->reset_count = 0;
 
         // 3. update to new src dimensions
         p->src = src;
@@ -186,7 +189,7 @@ static void resize(struct vo *vo)
     const int width = mp_rect_w(wl->geometry);
     const int height = mp_rect_h(wl->geometry);
     
-    vo_wayland_set_opaque_region(wl, 0);
+    vo_wayland_set_opaque_region(wl, false);
     vo->dwidth = width;
     vo->dheight = height;
 
@@ -208,6 +211,8 @@ static void resize(struct vo *vo)
 
     vo->want_redraw = true;
     p->resized = true;
+    p->want_reset = true;
+    p->want_resize = false;
 }
 
 static void draw_frame(struct vo *vo, struct vo_frame *frame)
@@ -218,15 +223,6 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
     
     if (!vo_wayland_check_visible(vo))
         return;
-
-    // ensure the pool is reset after hwdec seek,
-    // to avoid stutter artifact
-    p->reset_count++;
-    if (p->want_reset &&  p->reset_count <= 2){
-        wlbuf_pool_clean(p->wlbuf_pool);
-        if (p->reset_count == 2)
-            p->want_reset = false;
-    }
 
     /* lazy initialization of buffer pool */
     if (!p->wlbuf_pool) {
@@ -244,7 +240,14 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
     if (!entry)
         return;
 
-    MP_VERBOSE(entry->vo, "Schedule buffer pool entry : %lu\n",entry->key );
+    // ensure the pool is reset after hwdec seek,
+    // to avoid stutter artifact
+    if (p->want_reset)
+        wlbuf_pool_clean(p->wlbuf_pool,false);
+    if (p->want_resize)
+        resize(vo);
+
+    MP_TRACE(entry->vo, "Schedule buffer pool entry : %lu\n",entry->key );
     wl_surface_attach(wl->video_surface, entry->buffer, 0, 0);
     wl_surface_damage_buffer(wl->video_surface, 0, 0, INT32_MAX, INT32_MAX);
 }
@@ -252,6 +255,7 @@ static void draw_frame(struct vo *vo, struct vo_frame *frame)
 static void flip_page(struct vo *vo)
 {
     struct vo_wayland_state *wl = vo->wl;
+    struct priv *p = vo->priv;
 
     wl_surface_commit(wl->video_surface);
     wl_surface_commit(wl->surface);
@@ -259,6 +263,10 @@ static void flip_page(struct vo *vo)
         vo_wayland_wait_frame(wl);
     if (wl->use_present)
        present_sync_swap(wl->present);
+    if (p->want_reset) {
+        wlbuf_pool_clean(p->wlbuf_pool,false);
+        p->want_reset = false;
+    }
 }
 
 static void get_vsync(struct vo *vo, struct vo_vsync_info *info)
@@ -302,8 +310,7 @@ static int control(struct vo *vo, uint32_t request, void *data)
 
     switch (request) {
     case VOCTRL_SET_PANSCAN:
-        if (p->resized)
-            resize(vo);
+        p->want_resize = true;
         return VO_TRUE;
     case VOCTRL_LOAD_HWDEC_API:
         assert(p->hwdec_ctx.ra);
@@ -315,14 +322,16 @@ static int control(struct vo *vo, uint32_t request, void *data)
         break;
 	case VOCTRL_RESET:
         p->want_reset = true;
-        p->reset_count = 0;
 	    return VO_TRUE;
 	    break;
     }
 
     ret = vo_wayland_control(vo, &events, request, data);
-    if (events & VO_EVENT_RESIZE)
-        resize(vo);
+    if (events & VO_EVENT_RESIZE){
+        p->want_resize = true;
+        if (!p->resized)
+            resize(vo);
+    }
     if (events & VO_EVENT_EXPOSE)
         vo->want_redraw = true;
     vo_event(vo, events);
@@ -334,6 +343,7 @@ static void uninit(struct vo *vo)
 {
     struct priv *p = vo->priv;
 
+    wlbuf_pool_free(p->wlbuf_pool);
     if (p->solid_buffer_pool)
         wl_shm_pool_destroy(p->solid_buffer_pool);
     if (p->solid_buffer)
@@ -343,7 +353,6 @@ static void uninit(struct vo *vo)
         hwdec_devices_set_loader(vo->hwdec_devs, NULL, NULL);
         hwdec_devices_destroy(vo->hwdec_devs);
     }
-    wlbuf_pool_free(p->wlbuf_pool);
     vo_wayland_uninit(vo);
     ra_ctx_destroy(&p->ctx);
 }
@@ -359,8 +368,8 @@ static int preinit(struct vo *vo)
        goto err;
     assert(p->ctx->ra);
 
-    if (!vo->wl->dmabuf || !vo->wl->dmabuf_feedback) {
-        MP_FATAL(vo->wl, "Compositor doesn't support the %s (ver. 4) protocol!\n",
+    if (!vo->wl->dmabuf) {
+        MP_FATAL(vo->wl, "Compositor doesn't support the %s protocol!\n",
                  zwp_linux_dmabuf_v1_interface.name);
         goto err;
     }

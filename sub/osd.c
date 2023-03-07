@@ -61,12 +61,14 @@ static const m_option_t style_opts[] = {
     {"align-y", OPT_CHOICE(align_y,
         {"top", -1}, {"center", 0}, {"bottom", +1})},
     {"blur", OPT_FLOAT(blur), M_RANGE(0, 20)},
-    {"bold", OPT_FLAG(bold)},
-    {"italic", OPT_FLAG(italic)},
+    {"bold", OPT_BOOL(bold)},
+    {"italic", OPT_BOOL(italic)},
     {"justify", OPT_CHOICE(justify,
         {"auto", 0}, {"left", 1}, {"center", 2}, {"right", 3})},
     {"font-provider", OPT_CHOICE(font_provider,
         {"auto", 0}, {"none", 1}, {"fontconfig", 2}), .flags = UPDATE_SUB_HARD},
+    {"fonts-dir", OPT_STRING(fonts_dir),
+        .flags = M_OPT_FILE | UPDATE_SUB_HARD},
     {0}
 };
 

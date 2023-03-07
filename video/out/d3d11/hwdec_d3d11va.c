@@ -19,8 +19,6 @@
 #include <d3d11.h>
 #include <d3d11_1.h>
 
-#include "config.h"
-
 #include "common/common.h"
 #include "options/m_config.h"
 #include "osdep/windows_utils.h"
@@ -30,18 +28,16 @@
 #include "video/out/gpu/hwdec.h"
 
 struct d3d11va_opts {
-    int zero_copy;
+    bool zero_copy;
 };
 
 #define OPT_BASE_STRUCT struct d3d11va_opts
 const struct m_sub_options d3d11va_conf = {
     .opts = (const struct m_option[]) {
-        {"d3d11va-zero-copy", OPT_FLAG(zero_copy)},
+        {"d3d11va-zero-copy", OPT_BOOL(zero_copy)},
         {0}
     },
-    .defaults = &(const struct d3d11va_opts) {
-        .zero_copy = 0,
-    },
+    .defaults = &(const struct d3d11va_opts) {0},
     .size = sizeof(struct d3d11va_opts)
 };
 

@@ -22,7 +22,6 @@
 #include <math.h>
 #include <assert.h>
 
-#include "config.h"
 #include "mpv_talloc.h"
 
 #include "common/msg.h"
@@ -219,7 +218,6 @@ static void ao_chain_reset_state(struct ao_chain *ao_c)
 {
     ao_c->last_out_pts = MP_NOPTS_VALUE;
     ao_c->out_eof = false;
-    ao_c->underrun = false;
     ao_c->start_pts_known = false;
     ao_c->start_pts = MP_NOPTS_VALUE;
     ao_c->untimed_throttle = false;

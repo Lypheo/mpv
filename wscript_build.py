@@ -424,19 +424,6 @@ def build(ctx):
         ( "sub/sd_ass.c" ),
         ( "sub/sd_lavc.c" ),
 
-        ## Tests
-        ( "test/chmap.c",                        "tests" ),
-        ( "test/gl_video.c",                     "tests" ),
-        ( "test/img_format.c",                   "tests" ),
-        ( "test/json.c",                         "tests" ),
-        ( "test/linked_list.c",                  "tests" ),
-        ( "test/paths.c",                        "tests" ),
-        ( "test/repack.c",                       "tests && zimg" ),
-        ( "test/scale_sws.c",                    "tests" ),
-        ( "test/scale_test.c",                   "tests" ),
-        ( "test/scale_zimg.c",                   "tests && zimg" ),
-        ( "test/tests.c",                        "tests" ),
-
         ## Video
         ( "video/csputils.c" ),
         ( "video/cuda.c",                        "cuda-hwaccel" ),
@@ -557,7 +544,7 @@ def build(ctx):
         ( "video/out/vo_x11.c" ,                 "x11" ),
         ( "video/out/vo_xv.c",                   "xv" ),
         ( "video/out/vulkan/context.c",          "vulkan" ),
-        ( "video/out/vulkan/context_display.c",  "vulkan" ),
+        ( "video/out/vulkan/context_display.c",  "vulkan && vk-khr-display" ),
         ( "video/out/vulkan/context_android.c",  "vulkan && android" ),
         ( "video/out/vulkan/context_wayland.c",  "vulkan && wayland" ),
         ( "video/out/vulkan/context_win.c",      "vulkan && win32-desktop" ),

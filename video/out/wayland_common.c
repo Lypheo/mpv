@@ -133,7 +133,7 @@ const struct m_sub_options wayland_conf = {
     .opts = (const struct m_option[]) {
         {"wayland-configure-bounds", OPT_CHOICE(configure_bounds,
             {"auto", -1}, {"no", 0}, {"yes", 1})},
-        {"wayland-disable-vsync", OPT_FLAG(disable_vsync)},
+        {"wayland-disable-vsync", OPT_BOOL(disable_vsync)},
         {"wayland-edge-pixels-pointer", OPT_INT(edge_pixels_pointer),
             M_RANGE(0, INT_MAX)},
         {"wayland-edge-pixels-touch", OPT_INT(edge_pixels_touch),
@@ -143,7 +143,6 @@ const struct m_sub_options wayland_conf = {
     .size = sizeof(struct wayland_opts),
     .defaults = &(struct wayland_opts) {
         .configure_bounds = -1,
-        .disable_vsync = false,
         .edge_pixels_pointer = 10,
         .edge_pixels_touch = 32,
     },
@@ -273,7 +272,7 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
         (button == MP_MBTN_LEFT) && (state == MP_KEY_STATE_DOWN)) {
         uint32_t edges;
         // Implement an edge resize zone if there are no decorations
-        if (!wl->xdg_toplevel_decoration &&
+        if (!wl->vo_opts->border &&
             check_for_resize(wl, wl->mouse_unscaled_x, wl->mouse_unscaled_y,
                              wl->opts->edge_pixels_pointer, &edges))
             xdg_toplevel_resize(wl->xdg_toplevel, wl->seat, serial, edges);
@@ -979,8 +978,7 @@ static void preferred_scale(void *data,
     double old_scale = wl->scaling;
 
     // dmabuf_wayland is always wl->scaling = 1
-    bool dmabuf_wayland = !strcmp(wl->vo->driver->name, "dmabuf-wayland");
-    wl->scaling = !dmabuf_wayland ? (double)scale / 120 : 1;
+    wl->scaling = !wl->using_dmabuf_wayland ? (double)scale / 120 : 1;
     MP_VERBOSE(wl, "Obtained preferred scale, %f, from the compositor.\n",
                wl->scaling);
     wl->pending_vo_events |= VO_EVENT_DPI;
@@ -1107,11 +1105,11 @@ static void frame_callback(void *data, struct wl_callback *callback, uint32_t ti
     if (callback)
         wl_callback_destroy(callback);
 
-    wl->frame_callback = wl_surface_frame(wl->surface);
+    wl->frame_callback = wl_surface_frame(wl->callback_surface);
     wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
 
     if (wl->use_present) {
-        struct wp_presentation_feedback *fback = wp_presentation_feedback(wl->presentation, wl->surface);
+        struct wp_presentation_feedback *fback = wp_presentation_feedback(wl->presentation, wl->callback_surface);
         add_feedback(wl->fback_pool, fback);
         wp_presentation_feedback_add_listener(fback, &feedback_listener, wl->fback_pool);
     }
@@ -1122,6 +1120,24 @@ static void frame_callback(void *data, struct wl_callback *callback, uint32_t ti
 
 static const struct wl_callback_listener frame_listener = {
     frame_callback,
+};
+
+static void dmabuf_format(void *data, struct zwp_linux_dmabuf_v1 *zwp_linux_dmabuf,
+                          uint32_t format)
+{
+    struct vo_wayland_state *wl = data;
+
+    if (wl->drm_format_ct == wl->drm_format_ct_max) {
+        wl->drm_format_ct_max *= 2;
+        wl->drm_formats = talloc_realloc(wl, wl->drm_formats, int, wl->drm_format_ct_max);
+    }
+
+    wl->drm_formats[wl->drm_format_ct++] = format;
+    MP_VERBOSE(wl, "%s is supported by the compositor.\n", mp_tag_str(format));
+}
+
+static const struct zwp_linux_dmabuf_v1_listener dmabuf_listener = {
+    dmabuf_format
 };
 
 #if HAVE_WAYLAND_PROTOCOLS_1_24
@@ -1214,6 +1230,11 @@ static void registry_handle_add(void *data, struct wl_registry *reg, uint32_t id
         wl->dmabuf_feedback = zwp_linux_dmabuf_v1_get_default_feedback(wl->dmabuf);
         zwp_linux_dmabuf_feedback_v1_add_listener(wl->dmabuf_feedback, &dmabuf_feedback_listener, wl);
 #endif
+    } else if (!strcmp (interface, zwp_linux_dmabuf_v1_interface.name) && (ver >= 2) && found++) {
+        wl->dmabuf = wl_registry_bind(reg, id, &zwp_linux_dmabuf_v1_interface, 2);
+        zwp_linux_dmabuf_v1_add_listener(wl->dmabuf, &dmabuf_listener, wl);
+        wl->drm_format_ct_max = 64;
+        wl->drm_formats = talloc_array(wl, int, wl->drm_format_ct_max);
     }
 
     if (!strcmp (interface, wp_viewporter_interface.name) && (ver >= 1) && found++) {
@@ -1697,9 +1718,8 @@ static void set_surface_scaling(struct vo_wayland_state *wl)
         return;
 
     // dmabuf_wayland is always wl->scaling = 1
-    bool dmabuf_wayland = !strcmp(wl->vo->driver->name, "dmabuf-wayland");
     double old_scale = wl->scaling;
-    wl->scaling = !dmabuf_wayland ? wl->current_output->scale : 1;
+    wl->scaling = !wl->using_dmabuf_wayland ? wl->current_output->scale : 1;
 
     rescale_geometry(wl, old_scale);
     wl_surface_set_buffer_scale(wl->surface, wl->scaling);
@@ -1942,7 +1962,7 @@ int vo_wayland_control(struct vo *vo, int *events, int request, void *arg)
     }
     case VOCTRL_CONTENT_TYPE: {
 #if HAVE_WAYLAND_PROTOCOLS_1_27
-        wl->current_content_type = (enum mp_content_type)arg;
+        wl->current_content_type = *(enum mp_content_type *)arg;
         set_content_type(wl);
 #endif
         return VO_TRUE;
@@ -2047,6 +2067,7 @@ bool vo_wayland_init(struct vo *vo)
         .vo_opts_cache = m_config_cache_alloc(wl, vo->global, &vo_sub_opts),
     };
     wl->vo_opts = wl->vo_opts_cache->opts;
+    wl->using_dmabuf_wayland = !strcmp(wl->vo->driver->name, "dmabuf-wayland");
 
     wl_list_init(&wl->output_list);
 
@@ -2166,7 +2187,8 @@ bool vo_wayland_init(struct vo *vo)
     update_app_id(wl);
     mp_make_wakeup_pipe(wl->wakeup_pipe);
 
-    wl->frame_callback = wl_surface_frame(wl->surface);
+    wl->callback_surface = wl->using_dmabuf_wayland ? wl->video_surface : wl->surface;
+    wl->frame_callback = wl_surface_frame(wl->callback_surface);
     wl_callback_add_listener(wl->frame_callback, &frame_listener, wl);
     wl_surface_commit(wl->surface);
 
@@ -2195,7 +2217,11 @@ bool vo_wayland_reconfig(struct vo *vo)
         wl->pending_vo_events |= VO_EVENT_DPI;
     }
 
-    set_geometry(wl, false);
+    if (wl->vo_opts->auto_window_resize || mp_rect_w(wl->geometry) == 0 ||
+        mp_rect_h(wl->geometry) == 0)
+    {
+        set_geometry(wl, false);
+    }
 
     if (wl->opts->configure_bounds)
         set_window_bounds(wl);
@@ -2220,7 +2246,7 @@ bool vo_wayland_reconfig(struct vo *vo)
     return true;
 }
 
-void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, int alpha)
+void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, bool alpha)
 {
     const int32_t width = mp_rect_w(wl->geometry);
     const int32_t height = mp_rect_h(wl->geometry);
@@ -2232,24 +2258,6 @@ void vo_wayland_set_opaque_region(struct vo_wayland_state *wl, int alpha)
     } else {
         wl_surface_set_opaque_region(wl->surface, NULL);
     }
-}
-
-bool vo_wayland_supported_format(struct vo *vo, uint32_t drm_format, uint64_t modifier)
-{
-    struct vo_wayland_state *wl = vo->wl;
-
-    const struct {
-        uint32_t format;
-        uint32_t padding;
-        uint64_t modifier;
-    } *formats = wl->format_map;
-
-    for (int i = 0; i < wl->format_size / 16; ++i) {
-        if (drm_format == formats[i].format && modifier == formats[i].modifier)
-            return true;
-    }
-
-    return false;
 }
 
 void vo_wayland_uninit(struct vo *vo)

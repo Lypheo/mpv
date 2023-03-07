@@ -35,7 +35,6 @@
 
 #include "mpv_talloc.h"
 
-#include "config.h"
 #include "common/av_common.h"
 #include "common/common.h"
 #include "hwdec.h"
@@ -210,6 +209,7 @@ static void mp_image_destructor(void *ptr)
     av_buffer_unref(&mpi->a53_cc);
     av_buffer_unref(&mpi->dovi);
     av_buffer_unref(&mpi->film_grain);
+    av_buffer_unref(&mpi->dovi_buf);
     for (int n = 0; n < mpi->num_ff_side_data; n++)
         av_buffer_unref(&mpi->ff_side_data[n].buf);
     talloc_free(mpi->ff_side_data);
@@ -346,6 +346,7 @@ struct mp_image *mp_image_new_ref(struct mp_image *img)
     ref_buffer(&ok, &new->a53_cc);
     ref_buffer(&ok, &new->dovi);
     ref_buffer(&ok, &new->film_grain);
+    ref_buffer(&ok, &new->dovi_buf);
 
     new->ff_side_data = talloc_memdup(NULL, new->ff_side_data,
                         new->num_ff_side_data * sizeof(new->ff_side_data[0]));
@@ -389,6 +390,7 @@ struct mp_image *mp_image_new_dummy_ref(struct mp_image *img)
     new->a53_cc = NULL;
     new->dovi = NULL;
     new->film_grain = NULL;
+    new->dovi_buf = NULL;
     new->num_ff_side_data = 0;
     new->ff_side_data = NULL;
     return new;
@@ -514,6 +516,8 @@ static void assign_bufref(AVBufferRef **dst, AVBufferRef *new)
 
 void mp_image_copy_attributes(struct mp_image *dst, struct mp_image *src)
 {
+    assert(dst != src);
+
     dst->pict_type = src->pict_type;
     dst->fields = src->fields;
     dst->pts = src->pts;
@@ -527,10 +531,15 @@ void mp_image_copy_attributes(struct mp_image *dst, struct mp_image *src)
     dst->params.chroma_location = src->params.chroma_location;
     dst->params.alpha = src->params.alpha;
     dst->nominal_fps = src->nominal_fps;
+
     // ensure colorspace consistency
-    if (mp_image_params_get_forced_csp(&dst->params) !=
-        mp_image_params_get_forced_csp(&src->params))
-        dst->params.color = (struct mp_colorspace){0};
+    enum mp_csp dst_forced_csp = mp_image_params_get_forced_csp(&dst->params);
+    if (mp_image_params_get_forced_csp(&src->params) != dst_forced_csp) {
+        dst->params.color.space = dst_forced_csp != MP_CSP_AUTO ?
+                                    dst_forced_csp :
+                                    mp_csp_guess_colorspace(src->w, src->h);
+    }
+
     if ((dst->fmt.flags & MP_IMGFLAG_PAL) && (src->fmt.flags & MP_IMGFLAG_PAL)) {
         if (dst->planes[1] && src->planes[1]) {
             if (mp_image_make_writeable(dst))
@@ -539,8 +548,21 @@ void mp_image_copy_attributes(struct mp_image *dst, struct mp_image *src)
     }
     assign_bufref(&dst->icc_profile, src->icc_profile);
     assign_bufref(&dst->dovi, src->dovi);
+    assign_bufref(&dst->dovi_buf, src->dovi_buf);
     assign_bufref(&dst->film_grain, src->film_grain);
     assign_bufref(&dst->a53_cc, src->a53_cc);
+
+    for (int n = 0; n < dst->num_ff_side_data; n++)
+        av_buffer_unref(&dst->ff_side_data[n].buf);
+
+    MP_RESIZE_ARRAY(NULL, dst->ff_side_data, src->num_ff_side_data);
+    dst->num_ff_side_data = src->num_ff_side_data;
+
+    for (int n = 0; n < dst->num_ff_side_data; n++) {
+        dst->ff_side_data[n].type = src->ff_side_data[n].type;
+        dst->ff_side_data[n].buf = av_buffer_ref(src->ff_side_data[n].buf);
+        MP_HANDLE_OOM(dst->ff_side_data[n].buf);
+    }
 }
 
 // Crop the given image to (x0, y0)-(x1, y1) (bottom/right border exclusive)
@@ -880,18 +902,10 @@ void mp_image_params_guess_csp(struct mp_image_params *params)
     } else if (forced_csp == MP_CSP_XYZ) {
         params->color.space = MP_CSP_XYZ;
         params->color.levels = MP_CSP_LEVELS_PC;
-
-        // In theory, XYZ data does not really need a concept of 'primaries' to
-        // function, but this field can still be relevant for guiding gamut
-        // mapping optimizations, and it's also used by `mp_get_csp_matrix`
-        // when deciding what RGB space to map XYZ to for VOs that don't want
-        // to directly ingest XYZ into their color pipeline. We pick DCI-P3
-        // because it is the colorspace most closely matching digital cinema
-        // content, and also has the correct DCI whitepoint.
-        if (params->color.primaries == MP_CSP_PRIM_AUTO)
-            params->color.primaries = MP_CSP_PRIM_DCI_P3;
-        if (params->color.gamma == MP_CSP_TRC_AUTO)
-            params->color.gamma = MP_CSP_TRC_LINEAR;
+        // Force gamma to ST428 as this is the only correct for DCDM X'Y'Z'
+        params->color.gamma = MP_CSP_TRC_ST428;
+        // Don't care about primaries, they shouldn't be used, or if anything
+        // MP_CSP_PRIM_ST428 should be defined.
     } else {
         // We have no clue.
         params->color.space = MP_CSP_AUTO;
@@ -1024,6 +1038,10 @@ struct mp_image *mp_image_from_av_frame(struct AVFrame *src)
         if (rpu->disable_residual_flag)
             dst->dovi = sd->buf;
     }
+
+    sd = av_frame_get_side_data(src, AV_FRAME_DATA_DOVI_RPU_BUFFER);
+    if (sd)
+        dst->dovi_buf = sd->buf;
 #endif
 
     sd = av_frame_get_side_data(src, AV_FRAME_DATA_FILM_GRAIN_PARAMS);

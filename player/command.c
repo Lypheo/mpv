@@ -31,7 +31,6 @@
 #include <libavutil/avstring.h>
 #include <libavutil/common.h>
 
-#include "config.h"
 #include "mpv_talloc.h"
 #include "client.h"
 #include "common/av_common.h"
@@ -429,7 +428,7 @@ static int mp_property_display_sync_active(void *ctx, struct m_property *prop,
                                            int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    return m_property_flag_ro(action, arg, mpctx->display_sync_active);
+    return m_property_bool_ro(action, arg, mpctx->display_sync_active);
 }
 
 static int mp_property_pid(void *ctx, struct m_property *prop,
@@ -520,24 +519,27 @@ static int mp_property_media_title(void *ctx, struct m_property *prop,
                                    int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    char *name = NULL;
+    const char* name = NULL;
     if (mpctx->opts->media_title)
         name = mpctx->opts->media_title;
+    if ((!name || !name[0]) && mpctx->demuxer) {
+        name = mp_tags_get_str(mpctx->demuxer->metadata, "service_name");
+        if (!name || !name[0]){
+            name = mp_tags_get_str(mpctx->demuxer->metadata, "title");
+            if (!name || !name[0])
+                name = mp_tags_get_str(mpctx->demuxer->metadata, "icy-title");
+        }
+    }
+    struct playlist_entry *const pe = mpctx->playing;
+    if (pe) {
+        if (!name || !name[0]){
+            name = pe->title;
+        } else if (!pe->title) {
+            pe->title = talloc_strdup(pe, name);
+        }
+    }
     if (name && name[0])
         return m_property_strdup_ro(action, arg, name);
-    if (mpctx->demuxer) {
-        name = mp_tags_get_str(mpctx->demuxer->metadata, "service_name");
-        if (name && name[0])
-            return m_property_strdup_ro(action, arg, name);
-        name = mp_tags_get_str(mpctx->demuxer->metadata, "title");
-        if (name && name[0])
-            return m_property_strdup_ro(action, arg, name);
-        name = mp_tags_get_str(mpctx->demuxer->metadata, "icy-title");
-        if (name && name[0])
-            return m_property_strdup_ro(action, arg, name);
-    }
-    if (mpctx->playing && mpctx->playing->title)
-        return m_property_strdup_ro(action, arg, mpctx->playing->title);
     return mp_property_filename(ctx, prop, action, arg);
 }
 
@@ -1104,7 +1106,7 @@ static int get_edition_entry(int item, int action, void *arg, void *ctx)
         {"id",          SUB_PROP_INT(item)},
         {"title",       SUB_PROP_STR(title),
                         .unavailable = !title},
-        {"default",     SUB_PROP_FLAG(ed->default_edition)},
+        {"default",     SUB_PROP_BOOL(ed->default_edition)},
         {0}
     };
 
@@ -1339,14 +1341,14 @@ static int mp_property_core_idle(void *ctx, struct m_property *prop,
                                  int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    return m_property_flag_ro(action, arg, !mpctx->playback_active);
+    return m_property_bool_ro(action, arg, !mpctx->playback_active);
 }
 
 static int mp_property_idle(void *ctx, struct m_property *prop,
                             int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    return m_property_flag_ro(action, arg, mpctx->stop_play == PT_STOP);
+    return m_property_bool_ro(action, arg, mpctx->stop_play == PT_STOP);
 }
 
 static int mp_property_window_id(void *ctx, struct m_property *prop,
@@ -1368,7 +1370,7 @@ static int mp_property_eof_reached(void *ctx, struct m_property *prop,
         return M_PROPERTY_UNAVAILABLE;
     bool eof = mpctx->video_status == STATUS_EOF &&
                mpctx->audio_status == STATUS_EOF;
-    return m_property_flag_ro(action, arg, eof);
+    return m_property_bool_ro(action, arg, eof);
 }
 
 static int mp_property_seeking(void *ctx, struct m_property *prop,
@@ -1377,14 +1379,14 @@ static int mp_property_seeking(void *ctx, struct m_property *prop,
     MPContext *mpctx = ctx;
     if (!mpctx->playback_initialized)
         return M_PROPERTY_UNAVAILABLE;
-    return m_property_flag_ro(action, arg, !mpctx->restart_complete);
+    return m_property_bool_ro(action, arg, !mpctx->restart_complete);
 }
 
 static int mp_property_playback_abort(void *ctx, struct m_property *prop,
                                       int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    return m_property_flag_ro(action, arg, !mpctx->playing || mpctx->stop_play);
+    return m_property_bool_ro(action, arg, !mpctx->playing || mpctx->stop_play);
 }
 
 static int mp_property_cache_speed(void *ctx, struct m_property *prop,
@@ -1448,7 +1450,7 @@ static int mp_property_demuxer_cache_idle(void *ctx, struct m_property *prop,
     struct demux_reader_state s;
     demux_get_reader_state(mpctx->demuxer, &s);
 
-    return m_property_flag_ro(action, arg, s.idle);
+    return m_property_bool_ro(action, arg, s.idle);
 }
 
 static int mp_property_demuxer_cache_state(void *ctx, struct m_property *prop,
@@ -1527,7 +1529,7 @@ static int mp_property_paused_for_cache(void *ctx, struct m_property *prop,
     MPContext *mpctx = ctx;
     if (!mpctx->playback_initialized)
         return M_PROPERTY_UNAVAILABLE;
-    return m_property_flag_ro(action, arg, mpctx->paused_for_cache);
+    return m_property_bool_ro(action, arg, mpctx->paused_for_cache);
 }
 
 static int mp_property_cache_buffering(void *ctx, struct m_property *prop,
@@ -1547,7 +1549,7 @@ static int mp_property_demuxer_is_network(void *ctx, struct m_property *prop,
     if (!mpctx->demuxer)
         return M_PROPERTY_UNAVAILABLE;
 
-    return m_property_flag_ro(action, arg, mpctx->demuxer->is_network);
+    return m_property_bool_ro(action, arg, mpctx->demuxer->is_network);
 }
 
 
@@ -1569,7 +1571,7 @@ static int mp_property_seekable(void *ctx, struct m_property *prop,
     MPContext *mpctx = ctx;
     if (!mpctx->demuxer)
         return M_PROPERTY_UNAVAILABLE;
-    return m_property_flag_ro(action, arg, mpctx->demuxer->seekable);
+    return m_property_bool_ro(action, arg, mpctx->demuxer->seekable);
 }
 
 static int mp_property_partially_seekable(void *ctx, struct m_property *prop,
@@ -1578,14 +1580,14 @@ static int mp_property_partially_seekable(void *ctx, struct m_property *prop,
     MPContext *mpctx = ctx;
     if (!mpctx->demuxer)
         return M_PROPERTY_UNAVAILABLE;
-    return m_property_flag_ro(action, arg, mpctx->demuxer->partially_seekable);
+    return m_property_bool_ro(action, arg, mpctx->demuxer->partially_seekable);
 }
 
 static int mp_property_mixer_active(void *ctx, struct m_property *prop,
                                     int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    return m_property_flag_ro(action, arg, !!mpctx->ao);
+    return m_property_bool_ro(action, arg, !!mpctx->ao);
 }
 
 /// Volume (RW)
@@ -1673,7 +1675,7 @@ static int mp_property_ao_mute(void *ctx, struct m_property *prop,
         return M_PROPERTY_OK;
     }
     case M_PROPERTY_GET_TYPE:
-        *(struct m_option *)arg = (struct m_option){.type = CONF_TYPE_FLAG};
+        *(struct m_option *)arg = (struct m_option){.type = CONF_TYPE_BOOL};
         return M_PROPERTY_OK;
     }
     return M_PROPERTY_NOT_IMPLEMENTED;
@@ -1962,19 +1964,23 @@ static int get_track_entry(int item, int action, void *arg, void *ctx)
                         .unavailable = !track->lang},
         {"audio-channels", SUB_PROP_INT(track_channels(track)),
                         .unavailable = track_channels(track) <= 0},
-        {"image",       SUB_PROP_FLAG(track->image)},
-        {"albumart",    SUB_PROP_FLAG(track->attached_picture)},
-        {"default",     SUB_PROP_FLAG(track->default_track)},
-        {"forced",      SUB_PROP_FLAG(track->forced_track)},
-        {"dependent",   SUB_PROP_FLAG(track->dependent_track)},
-        {"visual-impaired",  SUB_PROP_FLAG(track->visual_impaired_track)},
-        {"hearing-impaired", SUB_PROP_FLAG(track->hearing_impaired_track)},
-        {"external",    SUB_PROP_FLAG(track->is_external)},
-        {"selected",    SUB_PROP_FLAG(track->selected)},
+        {"image",       SUB_PROP_BOOL(track->image)},
+        {"albumart",    SUB_PROP_BOOL(track->attached_picture)},
+        {"default",     SUB_PROP_BOOL(track->default_track)},
+        {"forced",      SUB_PROP_BOOL(track->forced_track)},
+        {"dependent",   SUB_PROP_BOOL(track->dependent_track)},
+        {"visual-impaired",  SUB_PROP_BOOL(track->visual_impaired_track)},
+        {"hearing-impaired", SUB_PROP_BOOL(track->hearing_impaired_track)},
+        {"external",    SUB_PROP_BOOL(track->is_external)},
+        {"selected",    SUB_PROP_BOOL(track->selected)},
         {"main-selection", SUB_PROP_INT(order), .unavailable = order < 0},
         {"external-filename", SUB_PROP_STR(track->external_filename),
                         .unavailable = !track->external_filename},
         {"ff-index",    SUB_PROP_INT(track->ff_index)},
+        {"hls-bitrate", SUB_PROP_INT(track->hls_bitrate),
+                        .unavailable = !track->hls_bitrate},
+        {"program-id",  SUB_PROP_INT(track->program_id),
+                        .unavailable = track->program_id < 0},
         {"decoder-desc", SUB_PROP_STR(decoder_desc),
                         .unavailable = !decoder_desc[0]},
         {"codec",       SUB_PROP_STR(p.codec),
@@ -2330,9 +2336,9 @@ static int mp_property_video_frame_info(void *ctx, struct m_property *prop,
 
     struct m_sub_property props[] = {
         {"picture-type",    SUB_PROP_STR(pict_type), .unavailable = !pict_type},
-        {"interlaced",      SUB_PROP_FLAG(!!(f->fields & MP_IMGFIELD_INTERLACED))},
-        {"tff",             SUB_PROP_FLAG(!!(f->fields & MP_IMGFIELD_TOP_FIRST))},
-        {"repeat",          SUB_PROP_FLAG(!!(f->fields & MP_IMGFIELD_REPEAT_FIRST))},
+        {"interlaced",      SUB_PROP_BOOL(!!(f->fields & MP_IMGFIELD_INTERLACED))},
+        {"tff",             SUB_PROP_BOOL(!!(f->fields & MP_IMGFIELD_TOP_FIRST))},
+        {"repeat",          SUB_PROP_BOOL(!!(f->fields & MP_IMGFIELD_REPEAT_FIRST))},
         {0}
     };
 
@@ -2492,7 +2498,7 @@ static int mp_property_focused(void *ctx, struct m_property *prop,
     if (vo_control(vo, VOCTRL_GET_FOCUSED, &focused) < 1)
         return M_PROPERTY_UNAVAILABLE;
 
-    return m_property_flag_ro(action, arg, focused);
+    return m_property_bool_ro(action, arg, focused);
 }
 
 static int mp_property_display_names(void *ctx, struct m_property *prop,
@@ -2523,7 +2529,7 @@ static int mp_property_vo_configured(void *ctx, struct m_property *prop,
                                      int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    return m_property_flag_ro(action, arg,
+    return m_property_bool_ro(action, arg,
                         mpctx->video_out && mpctx->video_out->config_ok);
 }
 
@@ -3028,8 +3034,8 @@ static int get_playlist_entry(int item, int action, void *arg, void *ctx)
     bool playing = mpctx->playing == e;
     struct m_sub_property props[] = {
         {"filename",    SUB_PROP_STR(e->filename)},
-        {"current",     SUB_PROP_FLAG(1), .unavailable = !current},
-        {"playing",     SUB_PROP_FLAG(1), .unavailable = !playing},
+        {"current",     SUB_PROP_BOOL(1), .unavailable = !current},
+        {"playing",     SUB_PROP_BOOL(1), .unavailable = !playing},
         {"title",       SUB_PROP_STR(e->title), .unavailable = !e->title},
         {"id",          SUB_PROP_INT64(e->id)},
         {0}
@@ -3291,6 +3297,12 @@ static int mp_property_libass_version(void *ctx, struct m_property *prop,
     return m_property_int64_ro(action, arg, ass_library_version());
 }
 
+static int mp_property_platform(void *ctx, struct m_property *prop,
+                                int action, void *arg)
+{
+    return m_property_strdup_ro(action, arg, PLATFORM);
+}
+
 static int mp_property_alias(void *ctx, struct m_property *prop,
                              int action, void *arg)
 {
@@ -3422,8 +3434,8 @@ static int mp_property_option_info(void *ctx, struct m_property *prop,
         struct m_sub_property props[] = {
             {"name",                    SUB_PROP_STR(co->name)},
             {"type",                    SUB_PROP_STR(opt->type->name)},
-            {"set-from-commandline",    SUB_PROP_FLAG(co->is_set_from_cmdline)},
-            {"set-locally",             SUB_PROP_FLAG(co->is_set_locally)},
+            {"set-from-commandline",    SUB_PROP_BOOL(co->is_set_from_cmdline)},
+            {"set-locally",             SUB_PROP_BOOL(co->is_set_locally)},
             {"default-value",           *opt, def},
             {"min",                     SUB_PROP_DOUBLE(opt->min),
              .unavailable = !(has_minmax && opt->min != DBL_MIN)},
@@ -3914,6 +3926,7 @@ static const struct m_property mp_properties_base[] = {
     {"mpv-configuration", mp_property_configuration},
     {"ffmpeg-version", mp_property_ffmpeg},
     {"libass-version", mp_property_libass_version},
+    {"platform", mp_property_platform},
 
     {"options", mp_property_options},
     {"file-local-options", mp_property_local_options},
@@ -4575,8 +4588,8 @@ static void cmd_osd_overlay(void *p)
         .res_x  = cmd->args[3].v.i,
         .res_y  = cmd->args[4].v.i,
         .z      = cmd->args[5].v.i,
-        .hidden = cmd->args[6].v.i,
-        .out_rc = cmd->args[7].v.i ? rc : NULL,
+        .hidden = cmd->args[6].v.b,
+        .out_rc = cmd->args[7].v.b ? rc : NULL,
     };
 
     osd_set_external(mpctx->osd, &ov);
@@ -5517,7 +5530,7 @@ static void cmd_track_add(void *p)
     struct MPContext *mpctx = cmd->mpctx;
     int type = *(int *)cmd->priv;
     bool is_albumart = type == STREAM_VIDEO &&
-                       cmd->args[4].v.i;
+                       cmd->args[4].v.b;
 
     if (mpctx->stop_play) {
         cmd->success = false;
@@ -5695,11 +5708,11 @@ static void cmd_subprocess(void *p)
     struct mp_cmd_ctx *cmd = p;
     struct MPContext *mpctx = cmd->mpctx;
     char **args = cmd->args[0].v.str_list;
-    bool playback_only = cmd->args[1].v.i;
-    bool detach = cmd->args[5].v.i;
+    bool playback_only = cmd->args[1].v.b;
+    bool detach = cmd->args[5].v.b;
     char **env = cmd->args[6].v.str_list;
     bstr stdin_data = bstr0(cmd->args[7].v.s);
-    bool passthrough_stdin = cmd->args[8].v.i;
+    bool passthrough_stdin = cmd->args[8].v.b;
 
     if (env && !env[0])
         env = NULL; // do not actually set an empty environment
@@ -5728,8 +5741,8 @@ static void cmd_subprocess(void *p)
             .msgl = fd == 2 ? MSGL_ERR : MSGL_INFO,
         };
     }
-    fdctx[1].capture = cmd->args[3].v.i;
-    fdctx[2].capture = cmd->args[4].v.i;
+    fdctx[1].capture = cmd->args[3].v.b;
+    fdctx[2].capture = cmd->args[4].v.b;
 
     pthread_mutex_lock(&mpctx->abort_lock);
     cmd->abort->coupled_to_playback = playback_only;
@@ -6368,7 +6381,7 @@ const struct mp_cmd_def mp_cmds[] = {
                 .flags = MP_CMD_OPT_ARG},
             {"title", OPT_STRING(v.s), .flags = MP_CMD_OPT_ARG},
             {"lang", OPT_STRING(v.s), .flags = MP_CMD_OPT_ARG},
-            {"albumart", OPT_FLAG(v.i), .flags = MP_CMD_OPT_ARG},
+            {"albumart", OPT_BOOL(v.b), .flags = MP_CMD_OPT_ARG},
         },
         .priv = &(const int){STREAM_VIDEO},
         .spawn_thread = true,
@@ -6486,15 +6499,15 @@ const struct mp_cmd_def mp_cmds[] = {
     { "subprocess", cmd_subprocess,
         {
             {"args", OPT_STRINGLIST(v.str_list)},
-            {"playback_only", OPT_FLAG(v.i), OPTDEF_INT(1)},
+            {"playback_only", OPT_BOOL(v.b), OPTDEF_INT(1)},
             {"capture_size", OPT_BYTE_SIZE(v.i64), M_RANGE(0, INT_MAX),
                 OPTDEF_INT64(64 * 1024 * 1024)},
-            {"capture_stdout", OPT_FLAG(v.i), .flags = MP_CMD_OPT_ARG},
-            {"capture_stderr", OPT_FLAG(v.i), .flags = MP_CMD_OPT_ARG},
-            {"detach", OPT_FLAG(v.i), .flags = MP_CMD_OPT_ARG},
+            {"capture_stdout", OPT_BOOL(v.b), .flags = MP_CMD_OPT_ARG},
+            {"capture_stderr", OPT_BOOL(v.b), .flags = MP_CMD_OPT_ARG},
+            {"detach", OPT_BOOL(v.b), .flags = MP_CMD_OPT_ARG},
             {"env", OPT_STRINGLIST(v.str_list), .flags = MP_CMD_OPT_ARG},
             {"stdin_data", OPT_STRING(v.s), .flags = MP_CMD_OPT_ARG},
-            {"passthrough_stdin", OPT_FLAG(v.i), .flags = MP_CMD_OPT_ARG},
+            {"passthrough_stdin", OPT_BOOL(v.b), .flags = MP_CMD_OPT_ARG},
         },
         .spawn_thread = true,
         .can_abort = true,
@@ -6597,8 +6610,8 @@ const struct mp_cmd_def mp_cmds[] = {
             {"res_x", OPT_INT(v.i), OPTDEF_INT(0)},
             {"res_y", OPT_INT(v.i), OPTDEF_INT(720)},
             {"z", OPT_INT(v.i), OPTDEF_INT(0)},
-            {"hidden", OPT_FLAG(v.i), OPTDEF_INT(0)},
-            {"compute_bounds", OPT_FLAG(v.i), OPTDEF_INT(0)},
+            {"hidden", OPT_BOOL(v.b), OPTDEF_INT(0)},
+            {"compute_bounds", OPT_BOOL(v.b), OPTDEF_INT(0)},
         },
         .is_noisy = true,
     },

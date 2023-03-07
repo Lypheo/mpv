@@ -3,13 +3,12 @@
 #include "video/out/vo.h"
 #include "video/csputils.h"
 
-#include "config.h"
 #include "ra.h"
 
 struct ra_ctx_opts {
-    int allow_sw;        // allow software renderers
-    int want_alpha;      // create an alpha framebuffer if possible
-    int debug;           // enable debugging layers/callbacks etc.
+    bool allow_sw;        // allow software renderers
+    bool want_alpha;      // create an alpha framebuffer if possible
+    bool debug;           // enable debugging layers/callbacks etc.
     bool probing;        // the backend was auto-probed
     char *context_name;  // filter by `ra_ctx_fns.name`
     char *context_type;  // filter by `ra_ctx_fns.type`
