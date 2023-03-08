@@ -48,7 +48,6 @@ struct sd_ass_priv {
     struct sd_filter **filters;
     int num_filters;
     bool clear_once;
-    bool on_top;
     struct mp_ass_packer *packer;
     struct sub_bitmap_copy_cache *copy_cache;
     char last_text[500];
@@ -532,8 +531,7 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
 {
     struct sd_ass_priv *ctx = sd->priv;
     struct mp_subtitle_opts *opts = sd->opts;
-    bool no_ass = !opts->ass_enabled || ctx->on_top ||
-                  opts->ass_style_override == 5;
+    bool no_ass = !opts->ass_enabled || opts->ass_style_override == 5;
     bool converted = ctx->is_converted || no_ass;
     ASS_Track *track = no_ass ? ctx->shadow_track : ctx->ass_track;
     ASS_Renderer *renderer = ctx->ass_renderer;
@@ -566,6 +564,7 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
     } else {
         ass_set_storage_size(renderer, 0, 0);
     }
+    
     long long ts = find_timestamp(sd, pts);
     if (ctx->duration_unknown && pts != MP_NOPTS_VALUE) {
         mp_ass_flush_old_events(track, ts);
@@ -583,7 +582,6 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
 done:
     // mangle_colors() modifies the color field, so copy the thing _before_.
     res = sub_bitmaps_copy(&ctx->copy_cache, res);
-
     if (!converted && res)
         mangle_colors(sd, res);
 
@@ -736,6 +734,8 @@ static struct sd_times get_times(struct sd *sd, double pts)
     return res;
 }
 
+// concatenates the plain text of all events at pts in ass_track and creates an
+// event with infinite duration in shadow_track that contains the result
 static void fill_plaintext(struct sd *sd, double pts)
 {
     struct sd_ass_priv *ctx = sd->priv;
@@ -749,7 +749,7 @@ static void fill_plaintext(struct sd *sd, double pts)
 
     bstr dst = {0};
 
-    if (ctx->on_top)
+    if (sd->opts->on_top)
         bstr_xappend(NULL, &dst, bstr0("{\\a6}"));
 
     while (*text) {
@@ -814,9 +814,6 @@ static int control(struct sd *sd, enum sd_ctrl cmd, void *arg)
     }
     case SD_CTRL_SET_VIDEO_PARAMS:
         ctx->video_params = *(struct mp_image_params *)arg;
-        return CONTROL_OK;
-    case SD_CTRL_SET_TOP:
-        ctx->on_top = *(bool *)arg;
         return CONTROL_OK;
     case SD_CTRL_UPDATE_OPTS: {
         int flags = (uintptr_t)arg;

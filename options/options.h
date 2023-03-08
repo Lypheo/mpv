@@ -75,7 +75,6 @@ typedef struct mp_vo_opts {
 // Subtitle options needed by the subtitle decoders/renderers.
 struct mp_subtitle_opts {
     bool sub_visibility;
-    bool sec_sub_visibility;
     int sub_pos;
     float sub_delay;
     float sub_fps;
@@ -110,6 +109,7 @@ struct mp_subtitle_opts {
     bool sub_clear_on_seek;
     int teletext_page;
     bool sub_past_video_end;
+    bool on_top;
 };
 
 struct mp_sub_filter_opts {
@@ -187,6 +187,7 @@ typedef struct MPOpts {
     bool cursor_autohide_fs;
 
     struct mp_subtitle_opts *subs_rend;
+    struct mp_subtitle_opts *subs2_rend;
     struct mp_sub_filter_opts *subs_filt;
     struct mp_osd_render_opts *osd_rend;
 
@@ -380,6 +381,7 @@ struct filter_opts {
 extern const struct m_sub_options vo_sub_opts;
 extern const struct m_sub_options dvd_conf;
 extern const struct m_sub_options mp_subtitle_sub_opts;
+extern const struct m_sub_options mp_subtitle_sub2_opts;
 extern const struct m_sub_options mp_sub_filter_opts;
 extern const struct m_sub_options mp_osd_render_sub_opts;
 extern const struct m_sub_options filter_conf;

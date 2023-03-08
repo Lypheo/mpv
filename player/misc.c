@@ -40,6 +40,7 @@
 #include "demux/demux.h"
 #include "stream/stream.h"
 #include "video/out/vo.h"
+#include "sub/dec_sub.h"
 
 #include "core.h"
 #include "command.h"
@@ -146,8 +147,12 @@ double get_track_seek_offset(struct MPContext *mpctx, struct track *track)
     if (track->selected) {
         if (track->type == STREAM_AUDIO)
             return -opts->audio_delay;
-        if (track->type == STREAM_SUB)
-            return -opts->subs_rend->sub_delay;
+        if (track->type == STREAM_SUB) {
+            struct mp_subtitle_opts *sub_opts = opts->subs_rend;
+            if (track->d_sub && sub_get_order(track->d_sub))
+                sub_opts = opts->subs2_rend;
+            return -sub_opts->sub_delay;
+        }
     }
     return 0;
 }

@@ -164,12 +164,12 @@ struct dec_sub *sub_create(struct mpv_global *global, struct sh_stream *sh,
                            struct attachment_list *attachments, int order)
 {
     assert(sh && sh->type == STREAM_SUB);
-
+    const struct m_sub_options* sub_opts = order ? &mp_subtitle_sub2_opts : &mp_subtitle_sub_opts;
     struct dec_sub *sub = talloc(NULL, struct dec_sub);
     *sub = (struct dec_sub){
         .log = mp_log_new(sub, global->log, "sub"),
         .global = global,
-        .opts_cache = m_config_cache_alloc(sub, global, &mp_subtitle_sub_opts),
+        .opts_cache = m_config_cache_alloc(sub, global, sub_opts),
         .sh = sh,
         .codec = sh->codec,
         .attachments = talloc_steal(sub, attachments),
@@ -211,7 +211,6 @@ static void update_segment(struct dec_sub *sub)
             talloc_free(sub->sd);
             sub->sd = new;
             update_subtitle_speed(sub);
-            sub_control(sub, SD_CTRL_SET_TOP, &sub->order);
         } else {
             // We'll just keep the current decoder, and feed it possibly
             // invalid data (not our fault if it crashes or something).
@@ -450,12 +449,14 @@ void sub_set_play_dir(struct dec_sub *sub, int dir)
     pthread_mutex_unlock(&sub->lock);
 }
 
-bool sub_is_primary_visible(struct dec_sub *sub)
+bool sub_is_visible(struct dec_sub *sub)
 {
     return !!sub->opts->sub_visibility;
 }
 
-bool sub_is_secondary_visible(struct dec_sub *sub)
-{
-    return !!sub->opts->sec_sub_visibility;
+int sub_get_order(struct dec_sub *sub) {
+    pthread_mutex_lock(&sub->lock);
+    int res = sub->order;
+    pthread_mutex_unlock(&sub->lock);
+    return res;
 }
