@@ -1718,6 +1718,7 @@ if get_option('cplayer')
 
     mpv = executable('mpv', objects: libmpv.extract_all_objects(recursive: true), dependencies: dependencies,
                      win_subsystem: 'windows,6.0', include_directories: includedir, install: true)
+                     #win_subsystem: 'console,6.0', include_directories: includedir, install: true)
 endif
 
 if get_option('tests')

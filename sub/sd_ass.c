@@ -48,7 +48,6 @@ struct sd_ass_priv {
     struct sd_filter **filters;
     int num_filters;
     bool clear_once;
-    bool on_top;
     struct mp_ass_packer *packer;
     struct sub_bitmap_copy_cache *copy_cache;
     char last_text[500];
@@ -294,6 +293,7 @@ static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
         if (!pkt)
             return;
     }
+    printf("Processing chunk: %.*s\n", pkt->len, pkt->buffer);
 
     ass_process_chunk(ctx->ass_track, pkt->buffer, pkt->len,
                       llrint(pkt->pts * 1000),
@@ -526,14 +526,15 @@ static long long find_timestamp(struct sd *sd, double pts)
 }
 
 #undef END
+static char *get_text_buf(struct sd *sd, double pts, enum sd_text_type type);
 
 static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
                                        int format, double pts)
 {
+
     struct sd_ass_priv *ctx = sd->priv;
     struct mp_subtitle_opts *opts = sd->opts;
-    bool no_ass = !opts->ass_enabled || ctx->on_top ||
-                  opts->ass_style_override == 5;
+    bool no_ass = !opts->ass_enabled || opts->ass_style_override == 5;
     bool converted = ctx->is_converted || no_ass;
     ASS_Track *track = no_ass ? ctx->shadow_track : ctx->ass_track;
     ASS_Renderer *renderer = ctx->ass_renderer;
@@ -566,6 +567,7 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
     } else {
         ass_set_storage_size(renderer, 0, 0);
     }
+    
     long long ts = find_timestamp(sd, pts);
     if (ctx->duration_unknown && pts != MP_NOPTS_VALUE) {
         mp_ass_flush_old_events(track, ts);
@@ -573,6 +575,7 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
         sd->preload_ok = false;
     }
 
+//    printf("%s\n", get_text_buf(sd, pts, SD_TEXT_TYPE_PLAIN));
     if (no_ass)
         fill_plaintext(sd, pts);
 
@@ -583,7 +586,9 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
 done:
     // mangle_colors() modifies the color field, so copy the thing _before_.
     res = sub_bitmaps_copy(&ctx->copy_cache, res);
-
+    // printf("rendered %s\n", !converted ? "non-converted" : "converted");
+//    for (;imgs; imgs = imgs->next)
+//        printf("    %d %d\n", imgs->w, imgs->h);
     if (!converted && res)
         mangle_colors(sd, res);
 
@@ -736,6 +741,8 @@ static struct sd_times get_times(struct sd *sd, double pts)
     return res;
 }
 
+// concatenates the plain text of all events at pts in ass_track and creates an
+// event with infinite duration in shadow_track that contains the result
 static void fill_plaintext(struct sd *sd, double pts)
 {
     struct sd_ass_priv *ctx = sd->priv;
@@ -749,7 +756,7 @@ static void fill_plaintext(struct sd *sd, double pts)
 
     bstr dst = {0};
 
-    if (ctx->on_top)
+    if (sd->opts->on_top)
         bstr_xappend(NULL, &dst, bstr0("{\\a6}"));
 
     while (*text) {
@@ -814,9 +821,6 @@ static int control(struct sd *sd, enum sd_ctrl cmd, void *arg)
     }
     case SD_CTRL_SET_VIDEO_PARAMS:
         ctx->video_params = *(struct mp_image_params *)arg;
-        return CONTROL_OK;
-    case SD_CTRL_SET_TOP:
-        ctx->on_top = *(bool *)arg;
         return CONTROL_OK;
     case SD_CTRL_UPDATE_OPTS: {
         int flags = (uintptr_t)arg;

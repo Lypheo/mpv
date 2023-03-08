@@ -468,8 +468,9 @@ static void add_sub_group(struct m_config_shadow *shadow, const char *name_prefi
                           const struct m_sub_options *subopts)
 {
     // Can't be used multiple times.
-    for (int n = 0; n < shadow->num_groups; n++)
+    for (int n = 0; n < shadow->num_groups; n++) {
         assert(shadow->groups[n].group != subopts);
+    }
 
     if (!name_prefix)
         name_prefix = "";

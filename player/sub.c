@@ -202,7 +202,6 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     sub_select(track->d_sub, true);
     int order = get_order(mpctx, track);
     osd_set_sub(mpctx->osd, order, track->d_sub);
-    sub_control(track->d_sub, SD_CTRL_SET_TOP, &order);
 
     if (mpctx->playback_initialized) {
         // Since subtitles are read passively/lazily, after a track

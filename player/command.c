@@ -2833,10 +2833,11 @@ static int mp_property_sub_delay(void *ctx, struct m_property *prop,
                                  int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    struct MPOpts *opts = mpctx->opts;
+    int sub_index = *((int *) prop->priv);
+    struct mp_subtitle_opts *sub_opts = sub_index ? mpctx->opts->subs2_rend : mpctx->opts->subs_rend;
     switch (action) {
     case M_PROPERTY_PRINT:
-        *(char **)arg = format_delay(opts->subs_rend->sub_delay);
+        *(char **)arg = format_delay(sub_opts->sub_delay);
         return M_PROPERTY_OK;
     }
     return mp_property_generic_option(mpctx, prop, action, arg);
@@ -2847,10 +2848,11 @@ static int mp_property_sub_speed(void *ctx, struct m_property *prop,
                                  int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    struct MPOpts *opts = mpctx->opts;
+    int sub_index = *((int *) prop->priv);
+    struct mp_subtitle_opts *sub_opts = sub_index ? mpctx->opts->subs2_rend : mpctx->opts->subs_rend;
     if (action == M_PROPERTY_PRINT) {
         *(char **)arg =
-            talloc_asprintf(NULL, "%4.1f%%", 100 * opts->subs_rend->sub_speed);
+            talloc_asprintf(NULL, "%4.1f%%", 100 * sub_opts->sub_speed);
         return M_PROPERTY_OK;
     }
     return mp_property_generic_option(mpctx, prop, action, arg);
@@ -2860,9 +2862,10 @@ static int mp_property_sub_pos(void *ctx, struct m_property *prop,
                                int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    struct MPOpts *opts = mpctx->opts;
+    int sub_index = *((int *) prop->priv);
+    struct mp_subtitle_opts *sub_opts = sub_index ? mpctx->opts->subs2_rend : mpctx->opts->subs_rend;
     if (action == M_PROPERTY_PRINT) {
-        *(char **)arg = talloc_asprintf(NULL, "%d/100", opts->subs_rend->sub_pos);
+        *(char **)arg = talloc_asprintf(NULL, "%d/100", sub_opts->sub_pos);
         return M_PROPERTY_OK;
     }
     return mp_property_generic_option(mpctx, prop, action, arg);
@@ -3873,15 +3876,20 @@ static const struct m_property mp_properties_base[] = {
     {"sid", property_switch_track, .priv = (void *)(const int[]){0, STREAM_SUB}},
     {"secondary-sid", property_switch_track,
      .priv = (void *)(const int[]){1, STREAM_SUB}},
-    {"sub-delay", mp_property_sub_delay},
-    {"sub-speed", mp_property_sub_speed},
-    {"sub-pos", mp_property_sub_pos},
+    {"sub-delay", mp_property_sub_delay, .priv = (void *)&(const int){0}},
+    {"secondary-sub-delay", mp_property_sub_delay, .priv = (void *)&(const int){1}},
+    {"sub-speed", mp_property_sub_speed, .priv = (void *)&(const int){0}},
+    {"secondary-sub-speed", mp_property_sub_speed, .priv = (void *)&(const int){1}},
+    {"sub-pos", mp_property_sub_pos, .priv = (void *)&(const int){0}},
+    {"secondary-sub-pos", mp_property_sub_pos, .priv = (void *)&(const int){1}},
     {"sub-text", mp_property_sub_text,
-        .priv = (void *)&(const int){SD_TEXT_TYPE_PLAIN}},
+.priv = (void *)&(const int){SD_TEXT_TYPE_PLAIN}},
     {"secondary-sub-text", mp_property_secondary_sub_text,
         .priv = (void *)&(const int){SD_TEXT_TYPE_PLAIN}},
     {"sub-text-ass", mp_property_sub_text,
         .priv = (void *)&(const int){SD_TEXT_TYPE_ASS}},
+    {"secondary-sub-text-ass", mp_property_secondary_sub_text,
+            .priv = (void *)&(const int){SD_TEXT_TYPE_ASS}},
     {"sub-start", mp_property_sub_start,
         .priv = (void *)&(const int){0}},
     {"secondary-sub-start", mp_property_sub_start,
@@ -5285,10 +5293,11 @@ static void cmd_sub_step_seek(void *p)
         a[1] = cmd->args[0].v.i;
         if (sub_control(sub, SD_CTRL_SUB_STEP, a) > 0) {
             if (step) {
-                mpctx->opts->subs_rend->sub_delay -= a[0] - refpts;
+                struct mp_subtitle_opts *sub_opts = track_ind ? mpctx->opts->subs2_rend : mpctx->opts->subs_rend;
+                sub_opts->sub_delay -= a[0] - refpts;
                 m_config_notify_change_opt_ptr_notify(mpctx->mconfig,
-                                               &mpctx->opts->subs_rend->sub_delay);
-                show_property_osd(mpctx, "sub-delay", cmd->on_osd);
+                                               &sub_opts->sub_delay);
+                show_property_osd(mpctx, track_ind ? "secondary-sub-delay" : "sub-delay", cmd->on_osd);
             } else {
                 // We can easily get stuck by failing to seek to the video
                 // frame which actually shows the sub first (because video
