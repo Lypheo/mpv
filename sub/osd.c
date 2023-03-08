@@ -110,6 +110,26 @@ const struct m_sub_options sub_style_conf = {
     .change_flags = UPDATE_OSD,
 };
 
+// m_config_shadow cannot store the same subconf twice, so we need a seperate one for secondary subs
+const struct m_sub_options sub2_style_conf = {
+        .opts = style_opts,
+        .size = sizeof(struct osd_style_opts),
+        .defaults = &(const struct osd_style_opts){
+                .font = "sans-serif",
+                .font_size = 55,
+                .color = {255, 255, 255, 255},
+                .border_color = {0, 0, 0, 255},
+                .shadow_color = {240, 240, 240, 128},
+                .border_size = 3,
+                .shadow_offset = 0,
+                .margin_x = 25,
+                .margin_y = 22,
+                .align_x = 0,
+                .align_y = 1,
+        },
+        .change_flags = UPDATE_OSD,
+};
+
 bool osd_res_equals(struct mp_osd_res a, struct mp_osd_res b)
 {
     return a.w == b.w && a.h == b.h && a.ml == b.ml && a.mt == b.mt
@@ -288,11 +308,8 @@ static struct sub_bitmaps *render_object(struct osd_state *osd,
 
     check_obj_resize(osd, osdres, obj);
 
-    if (obj->type == OSDTYPE_SUB) {
-        if (obj->sub && sub_is_primary_visible(obj->sub))
-            res = sub_get_bitmaps(obj->sub, obj->vo_res, format, video_pts);
-    } else if (obj->type == OSDTYPE_SUB2) {
-        if (obj->sub && sub_is_secondary_visible(obj->sub))
+    if (obj->type == OSDTYPE_SUB || obj->type == OSDTYPE_SUB2) {
+        if (obj->sub && sub_is_visible(obj->sub))
             res = sub_get_bitmaps(obj->sub, obj->vo_res, format, video_pts);
     } else if (obj->type == OSDTYPE_EXTERNAL2) {
         if (obj->external2 && obj->external2->format) {
