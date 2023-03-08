@@ -293,7 +293,6 @@ static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
         if (!pkt)
             return;
     }
-    printf("Processing chunk: %.*s\n", pkt->len, pkt->buffer);
 
     ass_process_chunk(ctx->ass_track, pkt->buffer, pkt->len,
                       llrint(pkt->pts * 1000),
@@ -526,12 +525,10 @@ static long long find_timestamp(struct sd *sd, double pts)
 }
 
 #undef END
-static char *get_text_buf(struct sd *sd, double pts, enum sd_text_type type);
 
 static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
                                        int format, double pts)
 {
-
     struct sd_ass_priv *ctx = sd->priv;
     struct mp_subtitle_opts *opts = sd->opts;
     bool no_ass = !opts->ass_enabled || opts->ass_style_override == 5;
@@ -575,7 +572,6 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
         sd->preload_ok = false;
     }
 
-//    printf("%s\n", get_text_buf(sd, pts, SD_TEXT_TYPE_PLAIN));
     if (no_ass)
         fill_plaintext(sd, pts);
 
@@ -586,9 +582,6 @@ static struct sub_bitmaps *get_bitmaps(struct sd *sd, struct mp_osd_res dim,
 done:
     // mangle_colors() modifies the color field, so copy the thing _before_.
     res = sub_bitmaps_copy(&ctx->copy_cache, res);
-    // printf("rendered %s\n", !converted ? "non-converted" : "converted");
-//    for (;imgs; imgs = imgs->next)
-//        printf("    %d %d\n", imgs->w, imgs->h);
     if (!converted && res)
         mangle_colors(sd, res);
 
