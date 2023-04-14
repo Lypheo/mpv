@@ -383,7 +383,7 @@ void reselect_demux_stream(struct MPContext *mpctx, struct track *track,
     if (refresh_only)
         demuxer_refresh_track(track->demuxer, track->stream, pts);
     else
-        demuxer_select_track(track->demuxer, track->stream, pts, track->selected);
+        demuxer_select_track(track->demuxer, track->stream, pts, track->active);
 }
 
 static void enable_demux_thread(struct MPContext *mpctx, struct demuxer *demux)
@@ -792,18 +792,24 @@ void mp_switch_track_n(struct MPContext *mpctx, int order, enum stream_type type
         }
     }
     if (type == STREAM_SUB)
-        uninit_sub(mpctx, current);
+        uninit_sub(mpctx, current, false);
 
     if (current) {
         current->selected = false;
-        reselect_demux_stream(mpctx, current, false);
+        if (type != STREAM_SUB) {
+            current->active = false;
+            reselect_demux_stream(mpctx, current, false);
+        }
     }
 
     mpctx->current_track[order][type] = track;
 
     if (track) {
         track->selected = true;
-        reselect_demux_stream(mpctx, track, false);
+        track->active = true;
+        bool need_refresh = type == STREAM_SUB && track->d_sub
+                            && sub_get_order(track->d_sub) != order;
+        reselect_demux_stream(mpctx, track, need_refresh);
     }
 
     if (type == STREAM_VIDEO && order == 0) {
@@ -862,6 +868,11 @@ bool mp_remove_track(struct MPContext *mpctx, struct track *track)
     mp_deselect_track(mpctx, track);
     if (track->selected)
         return false;
+
+    if (track->active) {
+        assert(track->type == STREAM_SUB);
+        uninit_sub(mpctx, track, true);
+    }
 
     struct demuxer *d = track->demuxer;
 
@@ -1353,7 +1364,7 @@ static void cleanup_deassociated_complex_filters(struct MPContext *mpctx)
                 talloc_free(track->dec->f);
                 track->dec = NULL;
             }
-            track->selected = false;
+            track->selected = track->active = false;
         }
     }
 
@@ -1471,6 +1482,7 @@ static int reinit_complex_filters(struct MPContext *mpctx, bool force_uninit)
 
         track->sink = pad;
         track->selected = true;
+        track->active = true;
 
         if (!track->dec) {
             if (track->type == STREAM_VIDEO && !init_video_decoder(mpctx, track))
@@ -1738,7 +1750,7 @@ static void play_current_file(struct MPContext *mpctx)
                     mpctx->current_track[i][t] = NULL;
                     mark_track_selection(mpctx, i, t, -2); // disable
                 } else {
-                    track->selected = true;
+                    track->selected = track->active = true;
                 }
             }
 
@@ -1749,8 +1761,12 @@ static void play_current_file(struct MPContext *mpctx)
         }
     }
 
-    for (int n = 0; n < mpctx->num_tracks; n++)
-        reselect_demux_stream(mpctx, mpctx->tracks[n], false);
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        struct track* track = mpctx->tracks[n];
+        if (track->type == STREAM_SUB)
+            track->active = true;
+        reselect_demux_stream(mpctx, track, false);
+    }
 
     update_demuxer_properties(mpctx);
 

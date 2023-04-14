@@ -298,6 +298,8 @@ static void filter_and_add(struct sd *sd, struct demux_packet *pkt)
                       llrint(pkt->pts * 1000),
                       llrint(pkt->duration * 1000));
 
+    MP_TRACE(sd, "Decoded packet: %s\n", pkt->buffer);
+
     if (pkt != orig_pkt)
         talloc_free(pkt);
 }

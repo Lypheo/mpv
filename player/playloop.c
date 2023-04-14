@@ -360,7 +360,7 @@ static void mp_seek(MPContext *mpctx, struct seek_params seek)
     // Seek external, extra files too:
     for (int t = 0; t < mpctx->num_tracks; t++) {
         struct track *track = mpctx->tracks[t];
-        if (track->selected && track->is_external && track->demuxer) {
+        if (track->active && track->is_external && track->demuxer) {
             double main_new_pos = demux_pts;
             if (!hr_seek || track->is_external)
                 main_new_pos += get_track_seek_offset(mpctx, track);
@@ -379,7 +379,7 @@ static void mp_seek(MPContext *mpctx, struct seek_params seek)
     demux_block_reading(mpctx->demuxer, false);
     for (int t = 0; t < mpctx->num_tracks; t++) {
         struct track *track = mpctx->tracks[t];
-        if (track->selected && track->demuxer)
+        if (track->active && track->demuxer)
             demux_block_reading(track->demuxer, false);
     }
 

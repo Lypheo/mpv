@@ -105,6 +105,7 @@ struct track {
     enum stream_type type;
 
     // Currently used for decoding.
+    bool active;
     bool selected;
 
     // The type specific ID, also called aid (audio), sid (subs), vid (video).
@@ -624,7 +625,7 @@ int64_t mp_load_user_script(struct MPContext *mpctx, const char *fname);
 void reset_subtitle_state(struct MPContext *mpctx);
 void reinit_sub(struct MPContext *mpctx, struct track *track);
 void reinit_sub_all(struct MPContext *mpctx);
-void uninit_sub(struct MPContext *mpctx, struct track *track);
+void uninit_sub(struct MPContext *mpctx, struct track *track, bool destroy);
 void uninit_sub_all(struct MPContext *mpctx);
 void update_osd_msg(struct MPContext *mpctx);
 bool update_subtitles(struct MPContext *mpctx, double video_pts);

@@ -33,6 +33,7 @@
 #include "demux/demux.h"
 #include "video/mp_image.h"
 
+#include "misc/dispatch.h"
 #include "core.h"
 
 // 0: primary sub, 1: secondary sub, -1: not selected
@@ -61,22 +62,25 @@ void reset_subtitle_state(struct MPContext *mpctx)
     term_osd_set_subs(mpctx, NULL);
 }
 
-void uninit_sub(struct MPContext *mpctx, struct track *track)
+void uninit_sub(struct MPContext *mpctx, struct track *track, bool destroy)
 {
     if (track && track->d_sub) {
-        reset_subtitles(mpctx, track);
-        sub_select(track->d_sub, false);
+        if (destroy) {
+            reset_subtitles(mpctx, track);
+            sub_select(track->d_sub, false);
+            sub_destroy(track->d_sub);
+            track->d_sub = NULL;
+        }
         int order = get_order(mpctx, track);
         osd_set_sub(mpctx->osd, order, NULL);
-        sub_destroy(track->d_sub);
-        track->d_sub = NULL;
     }
 }
 
 void uninit_sub_all(struct MPContext *mpctx)
 {
-    for (int n = 0; n < mpctx->num_tracks; n++)
-        uninit_sub(mpctx, mpctx->tracks[n]);
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        uninit_sub(mpctx, mpctx->tracks[n], true);
+    }
 }
 
 static bool update_subtitle(struct MPContext *mpctx, double video_pts,
@@ -93,14 +97,14 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
             sub_control(dec_sub, SD_CTRL_SET_VIDEO_PARAMS, &params);
     }
 
-    if (track->demuxer->fully_read && sub_can_preload(dec_sub)) {
+    if (track->demuxer->fully_read) {
         // Assume fully_read implies no interleaved audio/video streams.
         // (Reading packets will change the demuxer position.)
-        demux_seek(track->demuxer, 0, 0);
-        sub_preload(dec_sub);
-    }
-
-    if (!sub_read_packets(dec_sub, video_pts, mpctx->paused))
+        if (sub_can_preload(dec_sub)) {
+            demux_seek(track->demuxer, 0, 0);
+            sub_preload(dec_sub);
+        }
+    } else if (!sub_read_packets(dec_sub, video_pts, mpctx->paused))
         return false;
 
     // Handle displaying subtitles on terminal; never done for secondary subs
@@ -125,7 +129,6 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
             mp_set_timeout(mpctx, 0.1);
         }
     }
-
     return true;
 }
 
@@ -134,8 +137,11 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
 bool update_subtitles(struct MPContext *mpctx, double video_pts)
 {
     bool ok = true;
-    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++)
-        ok &= update_subtitle(mpctx, video_pts, mpctx->current_track[n][STREAM_SUB]);
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        if (mpctx->tracks[n]->type != STREAM_SUB)
+            continue;
+        ok &= update_subtitle(mpctx, video_pts, mpctx->tracks[n]);
+    }
     return ok;
 }
 
@@ -171,7 +177,7 @@ static bool init_subdec(struct MPContext *mpctx, struct track *track)
 
     track->d_sub = sub_create(mpctx->global, track,
                               get_all_attachments(mpctx),
-                              get_order(mpctx, track));
+                              get_order(mpctx, track) == 1 ? 1 : 0);
     if (!track->d_sub)
         return false;
 
@@ -189,25 +195,33 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     if (!track || !track->stream || track->stream->type != STREAM_SUB)
         return;
 
-    assert(!track->d_sub);
-
-    if (!init_subdec(mpctx, track)) {
-        error_on_track(mpctx, track);
-        return;
-    }
-
-    sub_select(track->d_sub, true);
     int order = get_order(mpctx, track);
-    osd_set_sub(mpctx->osd, order, track->d_sub);
+    if (track->d_sub) {
+        int cur_order = sub_get_order(track->d_sub);
+        if (order != cur_order)
+            uninit_sub(mpctx, track, true);
+    }
+    if (!track->d_sub) {
+        if (!init_subdec(mpctx, track)) {
+            error_on_track(mpctx, track);
+            return;
+        }
+    }
+    sub_select(track->d_sub, true);
+
+    if (track->selected)
+        osd_set_sub(mpctx->osd, order, track->d_sub);
 
     // When paused we have to wait for packets to be available.
     // So just retry until we get a packet in this case.
     if (mpctx->playback_initialized)
         while (!update_subtitles(mpctx, mpctx->playback_pts) && mpctx->paused);
+
+    MP_VERBOSE(track->demuxer, "Sub reinit done\n");
 }
 
 void reinit_sub_all(struct MPContext *mpctx)
 {
-    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++)
-        reinit_sub(mpctx, mpctx->current_track[n][STREAM_SUB]);
+    for (int n = 0; n < mpctx->num_tracks; n++)
+        reinit_sub(mpctx, mpctx->tracks[n]);
 }
