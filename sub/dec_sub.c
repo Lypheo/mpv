@@ -571,3 +571,10 @@ bool sub_is_secondary_visible(struct dec_sub *sub)
     mp_mutex_unlock(&sub->lock);
     return ret;
 }
+
+int sub_get_order(struct dec_sub *sub) {
+    mp_mutex_lock(&sub->lock);
+    int res = sub->order;
+    mp_mutex_unlock(&sub->lock);
+    return res;
+}

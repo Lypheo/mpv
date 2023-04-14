@@ -6354,6 +6354,7 @@ static void cmd_track_reload(void *p)
         nt->forced_track = flags & TRACK_FORCED;
     }
 
+    // TODO: handle secondary subs
     mp_switch_track(mpctx, nt->type, nt, 0);
     print_track_list(mpctx, "Reloaded:");
 }

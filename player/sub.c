@@ -32,6 +32,7 @@
 #include "demux/demux.h"
 #include "video/mp_image.h"
 
+#include "misc/dispatch.h"
 #include "core.h"
 
 // 0: primary sub, 1: secondary sub, -1: not selected
@@ -71,25 +72,28 @@ void reset_subtitle_state(struct MPContext *mpctx)
     term_osd_clear_subs(mpctx);
 }
 
-void uninit_sub(struct MPContext *mpctx, struct track *track)
+void uninit_sub(struct MPContext *mpctx, struct track *track, bool destroy)
 {
     if (track && track->d_sub) {
-        int order = get_order(mpctx, track);
-        reset_subtitles(mpctx, track);
-        sub_select(track->d_sub, false);
-        if (order >= 0) {
-            term_osd_set_subs(mpctx, NULL, order);
-            osd_set_sub(mpctx->osd, order, NULL);
+        if (destroy) {
+            reset_subtitles(mpctx, track);
+            sub_select(track->d_sub, false);
+            sub_destroy(track->d_sub);
+            track->d_sub = NULL;
         }
-        sub_destroy(track->d_sub);
-        track->d_sub = NULL;
+        int order = get_order(mpctx, track);
+        if (order >= 0) {
+            osd_set_sub(mpctx->osd, order, NULL);
+            term_osd_set_subs(mpctx, NULL, order);
+        }
     }
 }
 
 void uninit_sub_all(struct MPContext *mpctx)
 {
-    for (int n = 0; n < mpctx->num_tracks; n++)
-        uninit_sub(mpctx, mpctx->tracks[n]);
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        uninit_sub(mpctx, mpctx->tracks[n], true);
+    }
 }
 
 static bool update_subtitle(struct MPContext *mpctx, double video_pts,
@@ -165,8 +169,11 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
 bool update_subtitles(struct MPContext *mpctx, double video_pts)
 {
     bool ok = true;
-    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++)
-        ok &= update_subtitle(mpctx, video_pts, mpctx->current_track[n][STREAM_SUB]);
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        if (mpctx->tracks[n]->type != STREAM_SUB)
+            continue;
+        ok &= update_subtitle(mpctx, video_pts, mpctx->tracks[n]);
+    }
     return ok;
 }
 
@@ -202,7 +209,7 @@ static bool init_subdec(struct MPContext *mpctx, struct track *track)
 
     track->d_sub = sub_create(mpctx->global, track,
                               get_all_attachments(mpctx),
-                              get_order(mpctx, track));
+                              get_order(mpctx, track) == 1 ? 1 : 0);
     if (!track->d_sub)
         return false;
 
@@ -220,16 +227,22 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     if (!track || !track->stream || track->stream->type != STREAM_SUB)
         return;
 
-    mp_assert(!track->d_sub);
-
-    if (!init_subdec(mpctx, track)) {
-        error_on_track(mpctx, track);
-        return;
-    }
-
-    sub_select(track->d_sub, true);
     int order = get_order(mpctx, track);
-    osd_set_sub(mpctx->osd, order, track->d_sub);
+    if (track->d_sub) {
+        int cur_order = sub_get_order(track->d_sub);
+        if (order != cur_order)
+            uninit_sub(mpctx, track, true);
+    }
+    if (!track->d_sub) {
+        if (!init_subdec(mpctx, track)) {
+            error_on_track(mpctx, track);
+            return;
+        }
+    }
+    sub_select(track->d_sub, true);
+
+    if (track->selected)
+        osd_set_sub(mpctx->osd, order, track->d_sub);
 
     // When paused we have to wait for packets to be available.
     // Retry on a timeout until we get a packet. If still not successful,
@@ -248,6 +261,6 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
 
 void reinit_sub_all(struct MPContext *mpctx)
 {
-    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++)
-        reinit_sub(mpctx, mpctx->current_track[n][STREAM_SUB]);
+    for (int n = 0; n < mpctx->num_tracks; n++)
+        reinit_sub(mpctx, mpctx->tracks[n]);
 }
