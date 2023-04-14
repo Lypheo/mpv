@@ -244,7 +244,7 @@ void update_window_title(struct MPContext *mpctx, bool force)
 
 void error_on_track(struct MPContext *mpctx, struct track *track)
 {
-    if (!track || !track->selected)
+    if (!track || !track->active)
         return;
     mp_deselect_track(mpctx, track);
     if (track->type == STREAM_AUDIO)

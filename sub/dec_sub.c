@@ -164,7 +164,7 @@ struct dec_sub *sub_create(struct mpv_global *global, struct sh_stream *sh,
                            struct attachment_list *attachments, int order)
 {
     assert(sh && sh->type == STREAM_SUB);
-    const struct m_sub_options* sub_opts = order ? &mp_subtitle_sub2_opts : &mp_subtitle_sub_opts;
+    const struct m_sub_options* sub_opts = order == 1 ? &mp_subtitle_sub2_opts : &mp_subtitle_sub_opts;
     struct dec_sub *sub = talloc(NULL, struct dec_sub);
     *sub = (struct dec_sub){
         .log = mp_log_new(sub, global->log, "sub"),

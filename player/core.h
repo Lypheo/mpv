@@ -105,6 +105,7 @@ struct track {
     enum stream_type type;
 
     // Currently used for decoding.
+    bool active;
     bool selected;
 
     // The type specific ID, also called aid (audio), sid (subs), vid (video).

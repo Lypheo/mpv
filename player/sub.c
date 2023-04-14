@@ -64,19 +64,23 @@ void reset_subtitle_state(struct MPContext *mpctx)
 void uninit_sub(struct MPContext *mpctx, struct track *track)
 {
     if (track && track->d_sub) {
-        reset_subtitles(mpctx, track);
-        sub_select(track->d_sub, false);
+        if (!track->active) {
+            reset_subtitles(mpctx, track);
+            sub_select(track->d_sub, false);
+            sub_destroy(track->d_sub);
+            track->d_sub = NULL;
+        }
         int order = get_order(mpctx, track);
         osd_set_sub(mpctx->osd, order, NULL);
-        sub_destroy(track->d_sub);
-        track->d_sub = NULL;
     }
 }
 
 void uninit_sub_all(struct MPContext *mpctx)
 {
-    for (int n = 0; n < mpctx->num_tracks; n++)
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        mpctx->tracks[n]->active = false;
         uninit_sub(mpctx, mpctx->tracks[n]);
+    }
 }
 
 static bool update_subtitle(struct MPContext *mpctx, double video_pts,
@@ -137,8 +141,11 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
 bool update_subtitles(struct MPContext *mpctx, double video_pts, bool force_read_ahead)
 {
     bool ok = true;
-    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++)
-        ok &= update_subtitle(mpctx, video_pts, mpctx->current_track[n][STREAM_SUB], force_read_ahead);
+    for (int n = 0; n < mpctx->num_tracks; n++) {
+        if (mpctx->tracks[n]->type != STREAM_SUB)
+            continue;
+        ok &= update_subtitle(mpctx, video_pts, mpctx->tracks[n], force_read_ahead);
+    }
     return ok;
 }
 
@@ -192,16 +199,21 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     if (!track || !track->stream || track->stream->type != STREAM_SUB)
         return;
 
-    assert(!track->d_sub);
+    int new_order = get_order(mpctx, track), cur_order = sub_get_order(track->d_sub);
+    if (new_order != cur_order) {
 
-    if (!init_subdec(mpctx, track)) {
-        error_on_track(mpctx, track);
-        return;
     }
 
+    if (!track->d_sub) {
+        if (!init_subdec(mpctx, track)) {
+            error_on_track(mpctx, track);
+            return;
+        }
+    }
     sub_select(track->d_sub, true);
-    int order = get_order(mpctx, track);
-    osd_set_sub(mpctx->osd, order, track->d_sub);
+
+    if (track->selected)
+        osd_set_sub(mpctx->osd, new_order, track->d_sub);
 
     if (mpctx->playback_initialized) {
         // Since subtitles are read passively/lazily, after a track
@@ -220,14 +232,15 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
         // force_read_ahead to make sure we wait until the
         // demuxer has caught up to the current position.
         if (mpctx->paused)
-            while(!update_subtitles(mpctx, mpctx->playback_pts, true));
-        else 
-            update_subtitles(mpctx, mpctx->playback_pts, false);
+            while (!update_subtitle(mpctx, mpctx->playback_pts, track, true));
+        else
+            update_subtitle(mpctx, mpctx->playback_pts, track,false);
     }
+
 }   
 
 void reinit_sub_all(struct MPContext *mpctx)
 {
-    for (int n = 0; n < num_ptracks[STREAM_SUB]; n++)
-        reinit_sub(mpctx, mpctx->current_track[n][STREAM_SUB]);
+    for (int n = 0; n < mpctx->num_tracks; n++)
+        reinit_sub(mpctx, mpctx->tracks[n]);
 }

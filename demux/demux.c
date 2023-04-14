@@ -3992,7 +3992,7 @@ void demuxer_select_track(struct demuxer *demuxer, struct sh_stream *stream,
     ref_pts = MP_ADD_PTS(ref_pts, -in->ts_offset);
     // don't flush buffers if stream is already selected / unselected
     if (ds->selected != selected) {
-        MP_VERBOSE(in, "%sselect track %d\n", selected ? "" : "de", stream->index);
+        MP_VERBOSE(in, "%sactivate track %d\n", selected ? "" : "de", stream->index);
         ds->selected = selected;
         update_stream_selection_state(in, ds);
         in->tracks_switched = true;
