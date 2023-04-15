@@ -268,6 +268,9 @@ static bool is_new_segment(struct dec_sub *sub, struct demux_packet *p)
 // Read packets from the demuxer stream passed to sub_create(). Return true if
 // enough packets were read, false if the player should wait until the demuxer
 // signals new packets available (and then should retry).
+// The latter case only happens when reading ahead, either because subs have
+// a negative offset (and so their packets need to be fetched "from the future"),
+// or because force_read_ahead is enabled.
 bool sub_read_packets(struct dec_sub *sub, double video_pts, bool force_read_ahead)
 {
     bool r = true;
@@ -289,7 +292,7 @@ bool sub_read_packets(struct dec_sub *sub, double video_pts, bool force_read_ahe
         if (sub->new_segment)
             break;
 
-        // (Use this mechanism only if sub_delay matters to avoid corner cases.)
+        // (Use this mechanism sparingly to avoid corner cases.)
         double min_pts = sub->opts->sub_delay < 0 || force_read_ahead ? video_pts : MP_NOPTS_VALUE;
 
         struct demux_packet *pkt;

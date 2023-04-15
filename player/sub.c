@@ -33,6 +33,7 @@
 #include "demux/demux.h"
 #include "video/mp_image.h"
 
+#include "misc/dispatch.h"
 #include "core.h"
 
 // 0: primary sub, 1: secondary sub, -1: not selected
@@ -96,14 +97,14 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
             sub_control(dec_sub, SD_CTRL_SET_VIDEO_PARAMS, &params);
     }
 
-    if (track->demuxer->fully_read && sub_can_preload(dec_sub)) {
+    if (track->demuxer->fully_read) {
         // Assume fully_read implies no interleaved audio/video streams.
         // (Reading packets will change the demuxer position.)
-        demux_seek(track->demuxer, 0, 0);
-        sub_preload(dec_sub);
-    }
-
-    if (!sub_read_packets(dec_sub, video_pts, force_read_ahead))
+        if (sub_can_preload(dec_sub)) {
+            demux_seek(track->demuxer, 0, 0);
+            sub_preload(dec_sub);
+        }
+    } else if (!sub_read_packets(dec_sub, video_pts, force_read_ahead))
         return false;
 
     // Handle displaying subtitles on terminal; never done for secondary subs
@@ -128,10 +129,8 @@ static bool update_subtitle(struct MPContext *mpctx, double video_pts,
             mp_set_timeout(mpctx, 0.1);
         }
     }
-
     return true;
 }
-
 
 // Returns true if all available packets have been read (which may or may not include
 // the ones for the given PTS), unless force_read_ahead is set;
@@ -216,25 +215,26 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
         osd_set_sub(mpctx->osd, order, track->d_sub);
 
     if (mpctx->playback_initialized) {
-        // Since subtitles are read passively/lazily, after a track
-        // switch, sub packets with pts below the current video pts
-        // aren’t available in the demuxer queue.
-        // This is solved by refresh seeks,
-        // which seek back 10 sec on track switches to pick up
-        // all the missing sub packets along the way.
-        // However, since this happens concurrently,
-        // there is no guarantee the demuxer has caught up to
-        // current pos yet at the time of calling update_subtitles.
-        // During regular playback this isn’t an issue since
-        // subtitles are updated often enough anyway, however during
-        // pause, they’re only updated once after the track reinit
-        // so we need to loop the call. We also need to set
-        // force_read_ahead to make sure we wait until the
-        // demuxer has caught up to the current position.
-        if (mpctx->paused)
-            while (!update_subtitle(mpctx, mpctx->playback_pts, track, true));
-        else
-            update_subtitle(mpctx, mpctx->playback_pts, track,false);
+        if (mpctx->paused) {
+            // If a track is reinit’ed during pause
+            // this will be the only time that update_subtitles is called
+            // until playback resumes, so we need to enable read ahead
+            // and wait until the current subtitles have been decoded
+            // before returning and drawing them. (This isn’t necessary
+            // during playback because subs are updated on every new frame
+            // and drawing them a couple frames too late doesn’t matter too much.)
+            struct mp_dispatch_queue *demux_waiter = mp_dispatch_create(NULL);
+            demux_set_stream_wakeup_cb(track->stream,
+                                       (void (*)(void *)) mp_dispatch_interrupt, demux_waiter);
+
+            for (;; mp_dispatch_queue_process(demux_waiter, INFINITY))
+                if (update_subtitle(mpctx, mpctx->playback_pts, track, true))
+                    break;
+
+            demux_set_stream_wakeup_cb(track->stream, NULL, NULL);
+            talloc_free(demux_waiter);
+        } else
+            update_subtitle(mpctx, mpctx->playback_pts, track, true);
     }
     MP_VERBOSE(track->demuxer, "Sub reinit done\n");
 }

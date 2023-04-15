@@ -1142,6 +1142,7 @@ void write_video(struct MPContext *mpctx)
     osd_set_force_video_pts(mpctx->osd, MP_NOPTS_VALUE);
 
     if (!update_subtitles(mpctx, mpctx->next_frames[0]->pts, false)) {
+        // currently reading ahead due to negative subtitle offset
         MP_VERBOSE(mpctx, "Video frame delayed due to waiting on subtitles.\n");
         return;
     }

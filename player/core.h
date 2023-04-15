@@ -639,6 +639,7 @@ void reinit_sub_all(struct MPContext *mpctx);
 void uninit_sub(struct MPContext *mpctx, struct track *track, bool destroy);
 void uninit_sub_all(struct MPContext *mpctx);
 void update_osd_msg(struct MPContext *mpctx);
+
 bool update_subtitles(struct MPContext *mpctx, double video_pts, bool force_read_ahead);
 
 // video.c
