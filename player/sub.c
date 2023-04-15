@@ -61,10 +61,10 @@ void reset_subtitle_state(struct MPContext *mpctx)
     term_osd_set_subs(mpctx, NULL);
 }
 
-void uninit_sub(struct MPContext *mpctx, struct track *track)
+void uninit_sub(struct MPContext *mpctx, struct track *track, bool destroy)
 {
     if (track && track->d_sub) {
-        if (!track->active) {
+        if (destroy) {
             reset_subtitles(mpctx, track);
             sub_select(track->d_sub, false);
             sub_destroy(track->d_sub);
@@ -78,8 +78,7 @@ void uninit_sub(struct MPContext *mpctx, struct track *track)
 void uninit_sub_all(struct MPContext *mpctx)
 {
     for (int n = 0; n < mpctx->num_tracks; n++) {
-        mpctx->tracks[n]->active = false;
-        uninit_sub(mpctx, mpctx->tracks[n]);
+        uninit_sub(mpctx, mpctx->tracks[n], true);
     }
 }
 
@@ -199,11 +198,12 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     if (!track || !track->stream || track->stream->type != STREAM_SUB)
         return;
 
-    int new_order = get_order(mpctx, track), cur_order = sub_get_order(track->d_sub);
-    if (new_order != cur_order) {
-
+    int order = get_order(mpctx, track);
+    if (track->d_sub) {
+        int cur_order = sub_get_order(track->d_sub);
+        if (order != cur_order)
+            uninit_sub(mpctx, track, true);
     }
-
     if (!track->d_sub) {
         if (!init_subdec(mpctx, track)) {
             error_on_track(mpctx, track);
@@ -213,7 +213,7 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     sub_select(track->d_sub, true);
 
     if (track->selected)
-        osd_set_sub(mpctx->osd, new_order, track->d_sub);
+        osd_set_sub(mpctx->osd, order, track->d_sub);
 
     if (mpctx->playback_initialized) {
         // Since subtitles are read passively/lazily, after a track
@@ -236,8 +236,8 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
         else
             update_subtitle(mpctx, mpctx->playback_pts, track,false);
     }
-
-}   
+    MP_VERBOSE(track->demuxer, "Sub reinit done\n");
+}
 
 void reinit_sub_all(struct MPContext *mpctx)
 {

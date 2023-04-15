@@ -671,15 +671,16 @@ void mp_switch_track_n(struct MPContext *mpctx, int order, enum stream_type type
         }
     }
     if (type == STREAM_SUB)
-        uninit_sub(mpctx, current);
+        uninit_sub(mpctx, current, false);
 
     if (current) {
         if (current->remux_sink)
             close_recorder_and_error(mpctx);
         current->selected = false;
-        if (type != STREAM_SUB)
+        if (type != STREAM_SUB) {
             current->active = false;
-        reselect_demux_stream(mpctx, current, false);
+            reselect_demux_stream(mpctx, current, false);
+        }
     }
 
     mpctx->current_track[order][type] = track;
@@ -687,7 +688,7 @@ void mp_switch_track_n(struct MPContext *mpctx, int order, enum stream_type type
     if (track) {
         track->selected = true;
         track->active = true;
-        reselect_demux_stream(mpctx, track, false);
+        reselect_demux_stream(mpctx, track, type == STREAM_SUB);
     }
 
     if (type == STREAM_VIDEO && order == 0) {
@@ -749,8 +750,7 @@ bool mp_remove_track(struct MPContext *mpctx, struct track *track)
 
     if (track->active) {
         assert(track->type == STREAM_SUB);
-        track->active = false;
-        uninit_sub(mpctx, track);
+        uninit_sub(mpctx, track, true);
     }
 
     struct demuxer *d = track->demuxer;
