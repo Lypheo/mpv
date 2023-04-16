@@ -179,7 +179,7 @@ static bool init_subdec(struct MPContext *mpctx, struct track *track)
 
     track->d_sub = sub_create(mpctx->global, track->stream,
                               get_all_attachments(mpctx),
-                              get_order(mpctx, track));
+                              get_order(mpctx, track) == 1 ? 1 : 0);
     if (!track->d_sub)
         return false;
 
@@ -214,28 +214,9 @@ void reinit_sub(struct MPContext *mpctx, struct track *track)
     if (track->selected)
         osd_set_sub(mpctx->osd, order, track->d_sub);
 
-    if (mpctx->playback_initialized) {
-        if (mpctx->paused) {
-            // If a track is reinit’ed during pause
-            // this will be the only time that update_subtitles is called
-            // until playback resumes, so we need to enable read ahead
-            // and wait until the current subtitles have been decoded
-            // before returning and drawing them. (This isn’t necessary
-            // during playback because subs are updated on every new frame
-            // and drawing them a couple frames too late doesn’t matter too much.)
-            struct mp_dispatch_queue *demux_waiter = mp_dispatch_create(NULL);
-            demux_set_stream_wakeup_cb(track->stream,
-                                       (void (*)(void *)) mp_dispatch_interrupt, demux_waiter);
+    if (mpctx->playback_initialized)
+        update_subtitle(mpctx, mpctx->playback_pts, track, false);
 
-            for (;; mp_dispatch_queue_process(demux_waiter, INFINITY))
-                if (update_subtitle(mpctx, mpctx->playback_pts, track, true))
-                    break;
-
-            demux_set_stream_wakeup_cb(track->stream, NULL, NULL);
-            talloc_free(demux_waiter);
-        } else
-            update_subtitle(mpctx, mpctx->playback_pts, track, true);
-    }
     MP_VERBOSE(track->demuxer, "Sub reinit done\n");
 }
 

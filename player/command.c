@@ -5635,6 +5635,7 @@ static void cmd_track_reload(void *p)
     }
 
     struct track *nt = mpctx->tracks[nt_num];
+    // TODO: handle secondary subs
     mp_switch_track(mpctx, nt->type, nt, 0);
     print_track_list(mpctx, "Reloaded:");
 }

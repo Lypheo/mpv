@@ -688,7 +688,9 @@ void mp_switch_track_n(struct MPContext *mpctx, int order, enum stream_type type
     if (track) {
         track->selected = true;
         track->active = true;
-        reselect_demux_stream(mpctx, track, type == STREAM_SUB);
+        bool need_refresh = type == STREAM_SUB && track->d_sub
+                            && sub_get_order(track->d_sub) != order;
+        reselect_demux_stream(mpctx, track, need_refresh);
     }
 
     if (type == STREAM_VIDEO && order == 0) {
