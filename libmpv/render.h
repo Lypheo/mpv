@@ -731,6 +731,17 @@ MPV_EXPORT void mpv_render_context_report_swap(mpv_render_context *ctx);
  */
 MPV_EXPORT void mpv_render_context_free(mpv_render_context *ctx);
 
+struct render_api {
+    int (*mpv_render_context_create)(mpv_render_context **res, mpv_handle *mpv, mpv_render_param *params);
+    int (*mpv_render_context_set_parameter)(mpv_render_context *ctx, mpv_render_param param);
+    int (*mpv_render_context_get_info)(mpv_render_context *ctx, mpv_render_param param);
+    void (*mpv_render_context_set_update_callback)(mpv_render_context *ctx, mpv_render_update_fn callback, void *callback_ctx);
+    uint64_t (*mpv_render_context_update)(mpv_render_context *ctx);
+    int (*mpv_render_context_render)(mpv_render_context *ctx, mpv_render_param *params);
+    void (*mpv_render_context_report_swap)(mpv_render_context *ctx);
+    void (*mpv_render_context_free)(mpv_render_context *ctx);
+};
+
 #ifdef __cplusplus
 }
 #endif

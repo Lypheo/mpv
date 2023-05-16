@@ -2242,7 +2242,7 @@ bool mp_streamcb_lookup(struct mpv_global *g, const char *protocol,
     return found;
 }
 
-const struct mpapi mpapi_internal = {
+const struct client_api client_api_internal = {
     &mpv_event_name,
     &mpv_client_api_version,
     &mpv_error_string,
@@ -2289,4 +2289,25 @@ const struct mpapi mpapi_internal = {
 #if MPV_ENABLE_DEPRECATED
     &mpv_get_wakeup_pipe,
 #endif
+};
+
+const struct render_api render_api_internal = {
+        &mpv_render_context_create,
+        &mpv_render_context_set_parameter,
+        &mpv_render_context_get_info,
+        &mpv_render_context_set_update_callback,
+        &mpv_render_context_update,
+        &mpv_render_context_render,
+        &mpv_render_context_report_swap,
+        &mpv_render_context_free,
+};
+
+const struct stream_api stream_api_internal = {
+        &mpv_stream_cb_add_ro,
+};
+
+const struct mpapi mpapi_internal = {
+        &client_api_internal,
+        &render_api_internal,
+        &stream_api_internal,
 };

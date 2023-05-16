@@ -1889,7 +1889,7 @@ MPV_EXPORT int mpv_get_wakeup_pipe(mpv_handle *ctx);
 
 #endif
 
-struct mpapi {
+struct client_api {
     const char *(*mpv_event_name)(mpv_event_id event);
     unsigned long (*mpv_client_api_version)(void);
     const char *(*mpv_error_string)(int error);
@@ -1945,6 +1945,15 @@ struct mpapi {
     #if MPV_ENABLE_DEPRECATED
     int (*mpv_get_wakeup_pipe)(mpv_handle *ctx);
     #endif
+};
+
+struct render_api;
+struct stream_api;
+
+struct mpapi {
+    const struct client_api* client_api;
+    const struct render_api* render_api;
+    const struct stream_api* stream_api;
 };
 
 #ifdef __cplusplus
