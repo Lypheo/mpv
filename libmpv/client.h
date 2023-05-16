@@ -2025,6 +2025,75 @@ MPV_DEFINE_SYM_PTR(mpv_get_wakeup_pipe)
 
 #endif
 
+// FIXME: deprecated by the above, remove along with the secondary plugin entry point
+
+struct client_api {
+    const char *(*mpv_event_name)(mpv_event_id event);
+    unsigned long (*mpv_client_api_version)(void);
+    const char *(*mpv_error_string)(int error);
+    void (*mpv_free)(void *data);
+    const char *(*mpv_client_name)(mpv_handle *ctx);
+    int64_t (*mpv_client_id)(mpv_handle *ctx);
+    mpv_handle *(*mpv_create)(void);
+    int (*mpv_initialize)(mpv_handle *ctx);
+    void (*mpv_destroy)(mpv_handle *ctx);
+    void (*mpv_terminate_destroy)(mpv_handle *ctx);
+    mpv_handle *(*mpv_create_client)(mpv_handle *ctx, const char *name);
+    mpv_handle *(*mpv_create_weak_client)(mpv_handle *ctx, const char *name);
+    int (*mpv_load_config_file)(mpv_handle *ctx, const char *filename);
+    int64_t (*mpv_get_time_us)(mpv_handle *ctx);
+    void (*mpv_free_node_contents)(mpv_node *node);
+    int (*mpv_set_option)(mpv_handle *ctx, const char *name, mpv_format format,
+               void *data);
+    int (*mpv_set_option_string)(mpv_handle *ctx, const char *name, const char *data);
+    int (*mpv_command)(mpv_handle *ctx, const char **args);
+    int (*mpv_command_node)(mpv_handle *ctx, mpv_node *args, mpv_node *result);
+    int (*mpv_command_ret)(mpv_handle *ctx, const char **args, mpv_node *result);
+    int (*mpv_command_string)(mpv_handle *ctx, const char *args);
+    int (*mpv_command_async)(mpv_handle *ctx, uint64_t reply_userdata,
+               const char **args);
+    int (*mpv_command_node_async)(mpv_handle *ctx, uint64_t reply_userdata,
+               mpv_node *args);
+    void (*mpv_abort_async_command)(mpv_handle *ctx, uint64_t reply_userdata);
+    int (*mpv_set_property)(mpv_handle *ctx, const char *name, mpv_format format,
+               void *data);
+    int (*mpv_set_property_string)(mpv_handle *ctx, const char *name, const char *data);
+    int (*mpv_del_property)(mpv_handle *ctx, const char *name);
+    int (*mpv_set_property_async)(mpv_handle *ctx, uint64_t reply_userdata,
+               const char *name, mpv_format format, void *data);
+    int (*mpv_get_property)(mpv_handle *ctx, const char *name, mpv_format format,
+               void *data);
+    char *(*mpv_get_property_string)(mpv_handle *ctx, const char *name);
+    char *(*mpv_get_property_osd_string)(mpv_handle *ctx, const char *name);
+    int (*mpv_get_property_async)(mpv_handle *ctx, uint64_t reply_userdata,
+               const char *name, mpv_format format);
+    int (*mpv_observe_property)(mpv_handle *mpv, uint64_t reply_userdata,
+               const char *name, mpv_format format);
+    int (*mpv_unobserve_property)(mpv_handle *mpv, uint64_t registered_reply_userdata);
+    int (*mpv_event_to_node)(mpv_node *dst, mpv_event *src);
+    int (*mpv_request_event)(mpv_handle *ctx, mpv_event_id event, int enable);
+    int (*mpv_request_log_messages)(mpv_handle *ctx, const char *min_level);
+    mpv_event *(*mpv_wait_event)(mpv_handle *ctx, double timeout);
+    void (*mpv_wakeup)(mpv_handle *ctx);
+    void (*mpv_set_wakeup_callback)(mpv_handle *ctx, void (*cb)(void *d), void *d);
+    void (*mpv_wait_async_requests)(mpv_handle *ctx);
+    int (*mpv_hook_add)(mpv_handle *ctx, uint64_t reply_userdata,
+               const char *name, int priority);
+    int (*mpv_hook_continue)(mpv_handle *ctx, uint64_t id);
+    #if MPV_ENABLE_DEPRECATED
+    int (*mpv_get_wakeup_pipe)(mpv_handle *ctx);
+    #endif
+};
+
+struct render_api;
+struct stream_api;
+
+struct mpapi {
+    const struct client_api* client_api;
+    const struct render_api* render_api;
+    const struct stream_api* stream_api;
+};
+
 #ifdef __cplusplus
 }
 #endif

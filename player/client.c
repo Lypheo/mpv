@@ -2246,3 +2246,73 @@ bool mp_streamcb_lookup(struct mpv_global *g, const char *protocol,
     mp_mutex_unlock(&clients->lock);
     return found;
 }
+
+const struct client_api client_api_internal = {
+    &mpv_event_name,
+    &mpv_client_api_version,
+    &mpv_error_string,
+    &mpv_free,
+    &mpv_client_name,
+    &mpv_client_id,
+    &mpv_create,
+    &mpv_initialize,
+    &mpv_destroy,
+    &mpv_terminate_destroy,
+    &mpv_create_client,
+    &mpv_create_weak_client,
+    &mpv_load_config_file,
+    &mpv_get_time_us,
+    &mpv_free_node_contents,
+    &mpv_set_option,
+    &mpv_set_option_string,
+    &mpv_command,
+    &mpv_command_node,
+    &mpv_command_ret,
+    &mpv_command_string,
+    &mpv_command_async,
+    &mpv_command_node_async,
+    &mpv_abort_async_command,
+    &mpv_set_property,
+    &mpv_set_property_string,
+    &mpv_del_property,
+    &mpv_set_property_async,
+    &mpv_get_property,
+    &mpv_get_property_string,
+    &mpv_get_property_osd_string,
+    &mpv_get_property_async,
+    &mpv_observe_property,
+    &mpv_unobserve_property,
+    &mpv_event_to_node,
+    &mpv_request_event,
+    &mpv_request_log_messages,
+    &mpv_wait_event,
+    &mpv_wakeup,
+    &mpv_set_wakeup_callback,
+    &mpv_wait_async_requests,
+    &mpv_hook_add,
+    &mpv_hook_continue,
+#if MPV_ENABLE_DEPRECATED
+    &mpv_get_wakeup_pipe,
+#endif
+};
+
+const struct render_api render_api_internal = {
+        &mpv_render_context_create,
+        &mpv_render_context_set_parameter,
+        &mpv_render_context_get_info,
+        &mpv_render_context_set_update_callback,
+        &mpv_render_context_update,
+        &mpv_render_context_render,
+        &mpv_render_context_report_swap,
+        &mpv_render_context_free,
+};
+
+const struct stream_api stream_api_internal = {
+        &mpv_stream_cb_add_ro,
+};
+
+const struct mpapi mpapi_internal = {
+        &client_api_internal,
+        &render_api_internal,
+        &stream_api_internal,
+};

@@ -240,6 +240,11 @@ MPV_DEFINE_SYM_PTR(mpv_stream_cb_add_ro)
 
 #endif
 
+struct stream_api {
+    int (*mpv_stream_cb_add_ro) (mpv_handle *ctx, const char *protocol, void *user_data, mpv_stream_cb_open_ro_fn open_fn);
+};
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -1,3 +1,5 @@
+/subprojects
+.vscode/
 /subprojects/*
 !/subprojects/packagefiles
 !/subprojects/*.wrap
