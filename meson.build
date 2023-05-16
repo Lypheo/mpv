@@ -334,11 +334,11 @@ if features['libdl']
 endif
 
 cplugins = get_option('cplugins').require(
-    features['libdl'] and not win32 and cc.has_link_argument('-rdynamic'),
+    features['libdl'],
     error_message: 'cplugins not supported by the os or compiler!',
 )
 features += {'cplugins': cplugins.allowed()}
-if features['cplugins']
+if features['cplugins'] and posix
     link_flags += '-rdynamic'
 endif
 

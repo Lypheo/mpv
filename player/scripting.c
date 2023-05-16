@@ -41,6 +41,8 @@
 #include "client.h"
 #include "libmpv/client.h"
 
+extern const struct mpapi mpapi_internal;
+
 extern const struct mp_scripting mp_scripting_lua;
 extern const struct mp_scripting mp_scripting_cplugin;
 extern const struct mp_scripting mp_scripting_js;
@@ -298,21 +300,30 @@ bool mp_load_scripts(struct MPContext *mpctx)
 #include <dlfcn.h>
 
 #define MPV_DLOPEN_FN "mpv_open_cplugin"
+#define MPV_DLOPEN_FN2 "mpv_open_cplugin2"
 typedef int (*mpv_open_cplugin)(mpv_handle *handle);
+typedef int (*mpv_open_cplugin2)(mpv_handle *handle, const struct mpapi *mpapi);
 
 static int load_cplugin(struct mp_script_args *args)
 {
     void *lib = dlopen(args->filename, RTLD_NOW | RTLD_LOCAL);
     if (!lib)
         goto error;
+
+    char *err;
     // Note: once loaded, we never unload, as unloading the libraries linked to
     //       the plugin can cause random serious problems.
     mpv_open_cplugin sym = (mpv_open_cplugin)dlsym(lib, MPV_DLOPEN_FN);
-    if (!sym)
-        goto error;
+    if (!sym) {
+        err = dlerror();
+        mpv_open_cplugin2 sym2 = (mpv_open_cplugin2) dlsym(lib, MPV_DLOPEN_FN2);
+        if (!sym2)
+            goto error;
+        else
+            return sym2(args->client, &mpapi_internal) ? -1 : 0;
+    }
     return sym(args->client) ? -1 : 0;
-error: ;
-    char *err = dlerror();
+error:
     if (err)
         MP_ERR(args, "C plugin error: '%s'\n", err);
     return -1;
