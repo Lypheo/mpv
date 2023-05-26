@@ -260,7 +260,7 @@ Playback Control
 
         The way older versions of mpv played playlist files via ``--playlist``
         was not safe against maliciously constructed files. Such files may
-        trigger harmful actions. This has been the case for all verions of
+        trigger harmful actions. This has been the case for all versions of
         mpv prior to 0.31.0, and all MPlayer versions, but unfortunately this
         fact was not well documented earlier, and some people have even
         misguidedly recommended the use of ``--playlist`` with untrusted
@@ -1015,8 +1015,9 @@ Watch Later
 ``--watch-later-directory=<path>``
     The directory in which to store the "watch later" temporary files.
 
-    The default is a subdirectory named "watch_later" underneath the
-    config directory (usually ``~/.config/mpv/``).
+    If this option is unset, the files will be stored in a subdirectory
+    named "watch_later" underneath the local state directory
+    (usually ``~/.local/state/mpv/``).
 
 ``--no-resume-playback``
     Do not restore playback position from the ``watch_later`` configuration
@@ -1253,7 +1254,7 @@ Video
     :nvdec:     requires ``--vo=gpu`` (Any platform CUDA is available)
     :nvdec-copy: copies video back to system RAM (Any platform CUDA is available)
     :drm:       requires ``--vo=gpu`` (Linux only)
-    :drm-copy:   copies video back to system RAM (Linux ony)
+    :drm-copy:   copies video back to system RAM (Linux only)
 
     Other hwdecs (only use if you know you have to):
 
@@ -3076,7 +3077,7 @@ Window
 
     :window:  On top of all other windows.
     :system:  On top of system elements like Taskbar, Menubar and Dock.
-    :desktop: On top of the Dekstop behind windows and Desktop icons.
+    :desktop: On top of the Desktop behind windows and Desktop icons.
     :level:   A level as integer.
 
 ``--focus-on-open``, ``--no-focus-on-open``
@@ -3353,7 +3354,7 @@ Window
 ``--no-window-dragging``
     Don't move the window when clicking on it and moving the mouse pointer.
 
-``--x11-name``
+``--x11-name=<string>``
     Set the window class name for X11-based video output methods.
 
 ``--x11-netwm=<yes|no|auto>``
@@ -4770,8 +4771,6 @@ Cache
     This makes sense only with ``--cache``. If the normal cache is disabled,
     this option is ignored.
 
-    You need to set ``--cache-dir`` to use this.
-
     The cache file is append-only. Even if the player appears to prune data, the
     file space freed by it is not reused. The cache file is deleted when
     playback is closed.
@@ -4794,7 +4793,8 @@ Cache
     continue to use the cache file that was opened first.
 
 ``--cache-dir=<path>``
-    Directory where to create temporary files (default: none).
+    Directory where to create temporary files. Cache is stored in the system's
+    cache directory (usually ``~/.cache/mpv``) if this is unset.
 
     Currently, this is used for ``--cache-on-disk`` only.
 
@@ -5648,7 +5648,7 @@ them.
     ``video-sync=display-desync``, ``--no-audio``, and ``--untimed=yes``.
 
 ``--wayland-edge-pixels-pointer=<value>``
-    Defines the size of an edge border (default: 10) to initiate client side
+    Defines the size of an edge border (default: 16) to initiate client side
     resize events in the wayland contexts with the mouse. This is only active if
     there are no server side decorations from the compositor.
 
@@ -6103,7 +6103,7 @@ them.
 
     ``<material>`` can be one of the following:
 
-    :titlebar:              The standard macOS titel bar material.
+    :titlebar:              The standard macOS title bar material.
     :selection:             The standard macOS selection material.
     :menu:                  The standard macOS menu material. (macOS 10.11+)
     :popover:               The standard macOS popover material. (macOS 10.11+)
@@ -6506,11 +6506,6 @@ them.
     If set, allows inverse tone mapping (expanding SDR to HDR). Not supported
     by all tone mapping curves. Use with caution. (``--vo=gpu-next`` only)
 
-``--tone-mapping-crosstalk=<0.0..0.30>``
-    If nonzero, apply an extra crosstalk matrix before tone mapping. Can help
-    improve the appearance of strongly saturated monochromatic highlights.
-    (Default: 0.04, only affects ``--vo=gpu-next``)
-
 ``--tone-mapping-max-boost=<1.0..10.0>``
     Upper limit for how much the tone mapping algorithm is allowed to boost
     the average brightness by over-exposing the image. The default value of 1.0
@@ -6633,14 +6628,19 @@ them.
     Applications using libmpv with the render API need to provide the ICC
     profile via ``MPV_RENDER_PARAM_ICC_PROFILE``.
 
-``--icc-cache-dir=<dirname>``
-    Store and load the 3D LUTs created from the ICC profile in this directory.
-    This can be used to speed up loading, since LittleCMS 2 can take a while to
-    create a 3D LUT. Note that these files contain uncompressed LUTs. Their
-    size depends on the ``--icc-3dlut-size``, and can be very big.
+``--icc-cache``
+    Store and load 3D LUTs created from the ICC profile on disk in the
+    cache directory. This can be used to speed up loading, since LittleCMS
+    2 can take a while to create a 3D LUT. Note that these files contain
+    uncompressed LUTs. Their size depends on the ``--icc-3dlut-size``, and
+    can be very big.
 
     NOTE: This is not cleaned automatically, so old, unused cache files may
     stick around indefinitely.
+
+``--icc-cache-dir``
+    The directory where icc cache is stored. Cache is stored in the system's
+    cache directory (usually ``~/.cache/mpv``) if this is unset.
 
 ``--icc-intent=<value>``
     Specifies the ICC intent used for the color transformation (when using
@@ -6668,6 +6668,9 @@ them.
     content. The default of ``no`` means to use the profile values. The special
     value ``inf`` causes the BT.1886 curve to be treated as a pure power gamma
     2.4 function.
+
+``--icc-use-luma``
+    Use ICC profile luminance value. (Only for ``--vo=gpu-next``)
 
 ``--lut=<file>``
     Specifies a custom LUT (in Adobe .cube format) to apply to the colors
@@ -6774,15 +6777,19 @@ them.
 
     This option might be silently removed in the future.
 
-``--gpu-shader-cache-dir=<dirname>``
-    Store and load compiled GLSL shaders in this directory. Normally, shader
-    compilation is very fast, so this is usually not needed. It mostly matters
+``--gpu-shader-cache``
+    Store and load compiled GLSL shaders in the cache directory. Normally, shader
+    compilation is very fast, so this is not usually needed. It mostly matters
     for GPU APIs that require internally recompiling shaders to other languages,
     for example anything based on ANGLE or Vulkan. Enabling this can improve
     startup performance on these platforms.
 
     NOTE: This is not cleaned automatically, so old, unused cache files may
     stick around indefinitely.
+
+``--gpu-shader-cache-dir``
+    The directory where gpu shader cache is stored. Cache is stored in the system's
+    cache directory (usually ``~/.cache/mpv``) if this is unset.
 
 Miscellaneous
 -------------

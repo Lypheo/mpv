@@ -515,29 +515,32 @@ static int mp_property_file_size(void *ctx, struct m_property *prop,
     return m_property_int64_ro(action, arg, size);
 }
 
+static const char *find_non_filename_media_title(MPContext *mpctx)
+{
+    const char *name = mpctx->opts->media_title;
+    if (name && name[0])
+        return name;
+    if (mpctx->demuxer) {
+        name = mp_tags_get_str(mpctx->demuxer->metadata, "service_name");
+        if (name && name[0])
+            return name;
+        name = mp_tags_get_str(mpctx->demuxer->metadata, "title");
+        if (name && name[0])
+            return name;
+        name = mp_tags_get_str(mpctx->demuxer->metadata, "icy-title");
+        if (name && name[0])
+            return name;
+    }
+    if (mpctx->playing && mpctx->playing->title)
+        return mpctx->playing->title;
+    return NULL;
+}
+
 static int mp_property_media_title(void *ctx, struct m_property *prop,
                                    int action, void *arg)
 {
     MPContext *mpctx = ctx;
-    const char* name = NULL;
-    if (mpctx->opts->media_title)
-        name = mpctx->opts->media_title;
-    if ((!name || !name[0]) && mpctx->demuxer) {
-        name = mp_tags_get_str(mpctx->demuxer->metadata, "service_name");
-        if (!name || !name[0]){
-            name = mp_tags_get_str(mpctx->demuxer->metadata, "title");
-            if (!name || !name[0])
-                name = mp_tags_get_str(mpctx->demuxer->metadata, "icy-title");
-        }
-    }
-    struct playlist_entry *const pe = mpctx->playing;
-    if (pe) {
-        if (!name || !name[0]){
-            name = pe->title;
-        } else if (!pe->title) {
-            pe->title = talloc_strdup(pe, name);
-        }
-    }
+    const char *name = find_non_filename_media_title(mpctx);
     if (name && name[0])
         return m_property_strdup_ro(action, arg, name);
     return mp_property_filename(ctx, prop, action, arg);
@@ -3581,6 +3584,7 @@ struct udata_ctx {
     MPContext *mpctx;
     const char *path;
     mpv_node *node;
+    void *ta_parent;
 };
 
 static int do_op_udata(struct udata_ctx* ctx, int action, void *arg)
@@ -3606,6 +3610,7 @@ static int do_op_udata(struct udata_ctx* ctx, int action, void *arg)
     case M_PROPERTY_SET_NODE:
         assert(node);
         m_option_copy(&udata_type, node, arg);
+        talloc_steal(ctx->ta_parent, node_get_alloc(node));
         mp_notify_property(mpctx, ctx->path);
         return M_PROPERTY_OK;
     case M_PROPERTY_KEY_ACTION: {
@@ -3681,6 +3686,7 @@ static int do_op_udata(struct udata_ctx* ctx, int action, void *arg)
 
         struct udata_ctx nctx = *ctx;
         nctx.node = cnode;
+        nctx.ta_parent = node_get_alloc(node);
 
         // If we're going down another level, set up a new key-action.
         if (has_split) {
@@ -3703,6 +3709,7 @@ static int do_list_udata(int item, int action, void *arg, void *ctx)
 {
     struct udata_ctx nctx = *(struct udata_ctx*)ctx;
     nctx.node = &nctx.node->u.list->values[item];
+    nctx.ta_parent = &nctx.node->u.list;
 
     return do_op_udata(&nctx, action, arg);
 }
@@ -3728,6 +3735,7 @@ static int mp_property_udata(void *ctx, struct m_property *prop,
         .mpctx = mpctx,
         .path = path,
         .node = &mpctx->command_ctx->udata,
+        .ta_parent = &mpctx->command_ctx,
     };
 
     int ret = do_op_udata(&nctx, action, arg);
@@ -6769,6 +6777,17 @@ static void command_event(struct MPContext *mpctx, int event, void *arg)
 
     if (event == MPV_EVENT_FILE_LOADED)
         audio_update_media_role(mpctx);
+
+    if (event == MP_EVENT_METADATA_UPDATE) {
+        struct playlist_entry *const pe = mpctx->playing;
+        if (!pe->title) {
+            const char *const name = find_non_filename_media_title(mpctx);
+            if (name && name[0]) {
+                pe->title = talloc_strdup(pe, name);
+                mp_notify_property(mpctx, "playlist");
+            }
+        }
+    }
 }
 
 void handle_command_updates(struct MPContext *mpctx)

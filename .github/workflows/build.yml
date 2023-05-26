@@ -22,12 +22,13 @@ jobs:
       - uses: actions/cache@v3
         with:
           path: mingw_prefix/
-          key: "${{ matrix.target }}-6"
+          key: "${{ matrix.target }}-7"
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y autoconf automake pkg-config g++-mingw-w64 gcc-multilib meson nasm
+          sudo apt-get install -y autoconf automake pkg-config g++-mingw-w64 gcc-multilib python3-pip ninja-build nasm
+          sudo python3 -m pip install meson
           ./bootstrap.py
 
       - name: Build libraries
@@ -44,7 +45,7 @@ jobs:
           TARGET: ${{ matrix.target }}
 
       - name: Print meson log
-        if: steps.build.outcome == 'failure'
+        if: ${{ failure() && steps.build.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/meson-log.txt
 
@@ -56,7 +57,7 @@ jobs:
           TARGET: ${{ matrix.target }}
 
       - name: Print waf log
-        if: steps.build_waf.outcome == 'failure'
+        if: ${{ failure() && steps.build_waf.outcome == 'failure' }}
         run: |
           cat ./build_waf/config.log
 
@@ -96,7 +97,7 @@ jobs:
           TRAVIS_OS_NAME: "${{ matrix.os }}"
 
       - name: Print meson log
-        if: steps.build.outcome == 'failure'
+        if: ${{ failure() && steps.build.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/meson-log.txt
 
@@ -106,7 +107,7 @@ jobs:
           meson test -C build
 
       - name: Print meson test log
-        if: steps.tests.outcome == 'failure'
+        if: ${{ failure() && steps.tests.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/testlog.txt
 
@@ -119,7 +120,7 @@ jobs:
           TRAVIS_OS_NAME: "${{ matrix.os }}"
 
       - name: Print waf log
-        if: steps.build_waf.outcome == 'failure'
+        if: ${{ failure() && steps.build_waf.outcome == 'failure' }}
         run: |
           cat ./build_waf/config.log
 
@@ -149,7 +150,7 @@ jobs:
           ./ci/build-tumbleweed.sh meson
 
       - name: Print meson log
-        if: steps.build.outcome == 'failure'
+        if: ${{ failure() && steps.build.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/meson-log.txt
 
@@ -159,7 +160,7 @@ jobs:
           meson test -C build
 
       - name: Print meson test log
-        if: steps.tests.outcome == 'failure'
+        if: ${{ failure() && steps.tests.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/testlog.txt
 
@@ -169,7 +170,7 @@ jobs:
           ./ci/build-tumbleweed.sh waf
 
       - name: Print waf log
-        if: steps.build_waf.outcome == 'failure'
+        if: ${{ failure() && steps.build_waf.outcome == 'failure' }}
         run: |
           cat ./build_waf/config.log
 
@@ -271,7 +272,7 @@ jobs:
             libdvdnav:p
             libjpeg-turbo:p
             libplacebo:p
-            luajit:p
+            lua51:p
             meson:p
             ninja:p
             pkgconf:p
@@ -290,7 +291,7 @@ jobs:
           ./ci/build-msys2.sh meson
 
       - name: Print meson log
-        if: steps.build.outcome == 'failure'
+        if: ${{ failure() && steps.build.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/meson-log.txt
 
@@ -300,7 +301,7 @@ jobs:
           meson test -C build
 
       - name: Print meson test log
-        if: steps.tests.outcome == 'failure'
+        if: ${{ failure() && steps.tests.outcome == 'failure' }}
         run: |
           cat ./build/meson-logs/testlog.txt
 
@@ -310,6 +311,6 @@ jobs:
           ./ci/build-msys2.sh waf
 
       - name: Print waf log
-        if: steps.build_waf.outcome == 'failure'
+        if: ${{ failure() && steps.build_waf.outcome == 'failure' }}
         run: |
           cat ./build_waf/config.log

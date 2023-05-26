@@ -123,7 +123,6 @@ struct gl_tone_map_opts {
     float curve_param;
     float max_boost;
     bool inverse;
-    float crosstalk;
     int mode;
     int compute_peak;
     float decay_rate;
@@ -171,6 +170,7 @@ struct gl_video_opts {
     float unsharp;
     int tex_pad_x, tex_pad_y;
     struct mp_icc_opts *icc_opts;
+    bool shader_cache;
     int early_flush;
     char *shader_cache_dir;
     char *hwdec_interop;

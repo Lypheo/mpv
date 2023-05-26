@@ -27,6 +27,12 @@ Interface changes
 ::
 
  --- mpv 0.36.0 ---
+    - Target luminance value is now also applied when ICC profile is used.
+      `--icc-use-luma` has been added to use ICC profile luminance value.
+      If target luminance and ICC luminance is not used, old behavior apply,
+      defaulting to 203 nits. (Only applies for `--vo=gpu-next`)
+    - `playlist/N/title` gets set upon opening the file if it wasn't already set
+      and a title is available.
     - add the `--vo=kitty` video output driver, as well as the options
       `--vo-kitty-cols`, `--vo-kitty-rows`, `--vo-kitty-width`,
       `--vo-kitty-height`, `--vo-kitty-left`, `--vo-kitty-top`,
@@ -43,7 +49,7 @@ Interface changes
     - add `--video-sync=display-tempo`
     - the `start` option is no longer unconditionally written by
       watch-later. It is still written by default but you may
-      need to explictly add `start` depending on how you have
+      need to explicitly add `start` depending on how you have
       `--watch-later-options` configured.
     - add `--vd-lavc-dr=auto` and make it the default
     - add support for the fractional scale protocol in wayland
@@ -59,6 +65,17 @@ Interface changes
       `--gamma` to float.
     - add `platform` property
     - add `--auto-window-resize`
+    - `--save-position-on-quit` and its associated commands now store state files in
+      the XDG_STATE_HOME directory by default. This only has an effect on linux/bsd
+      systems.
+    - mpv now implictly saves cache files in XDG_CACHE_HOME by default. This only has
+      an effect if the user enables options that would lead to cache being stored and
+      only makes a difference on linux/bsd systems.
+    - `--cache-on-disk` no longer requires explictly setting the `--cache-dir` option
+    - add `--icc-cache` and `--gpu-shader-cache` options to control whether or not to
+      save cache files for these features; explictly setting `--icc-cache-dir` and
+      `--gpu-shader-cache` is no longer required
+    - remove the `--tone-mapping-crosstalk` option
  --- mpv 0.35.0 ---
     - add the `--vo=gpu-next` video output driver, as well as the options
       `--allow-delayed-peak-detect`, `--builtin-scalers`,

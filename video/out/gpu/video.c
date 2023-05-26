@@ -322,7 +322,6 @@ static const struct gl_video_opts gl_video_opts_def = {
         .curve = TONE_MAPPING_AUTO,
         .curve_param = NAN,
         .max_boost = 1.0,
-        .crosstalk = 0.04,
         .decay_rate = 100.0,
         .scene_threshold_low = 5.5,
         .scene_threshold_high = 10.0,
@@ -389,8 +388,6 @@ const struct m_sub_options gl_video_conf = {
             {"st2094-10", TONE_MAPPING_ST2094_10})},
         {"tone-mapping-param", OPT_FLOATDEF(tone_map.curve_param)},
         {"inverse-tone-mapping", OPT_BOOL(tone_map.inverse)},
-        {"tone-mapping-crosstalk", OPT_FLOAT(tone_map.crosstalk),
-            M_RANGE(0.0, 0.3)},
         {"tone-mapping-max-boost", OPT_FLOAT(tone_map.max_boost),
             M_RANGE(1.0, 10.0)},
         {"tone-mapping-mode", OPT_CHOICE(tone_map.mode,
@@ -465,6 +462,7 @@ const struct m_sub_options gl_video_conf = {
         {"gpu-tex-pad-x", OPT_INT(tex_pad_x), M_RANGE(0, 4096)},
         {"gpu-tex-pad-y", OPT_INT(tex_pad_y), M_RANGE(0, 4096)},
         {"", OPT_SUBSTRUCT(icc_opts, mp_icc_conf)},
+        {"gpu-shader-cache", OPT_BOOL(shader_cache)},
         {"gpu-shader-cache-dir", OPT_STRING(shader_cache_dir), .flags = M_OPT_FILE},
         {"gpu-hwdec-interop",
             OPT_STRING_VALIDATE(hwdec_interop, ra_hwdec_validate_opt)},
@@ -485,6 +483,7 @@ const struct m_sub_options gl_video_conf = {
         {"gamut-clipping", OPT_REMOVED("Replaced by --gamut-mapping-mode=desaturate")},
         {"tone-mapping-desaturate", OPT_REMOVED("Replaced by --tone-mapping-mode")},
         {"tone-mapping-desaturate-exponent", OPT_REMOVED("Replaced by --tone-mapping-mode")},
+        {"tone-mapping-crosstalk", OPT_REMOVED("Hard-coded as 0.04")},
         {0}
     },
     .size = sizeof(struct gl_video_opts),
@@ -1338,18 +1337,20 @@ static const char *get_tex_swizzle(struct image *img)
 
 // Copy a texture to the vec4 color, while increasing offset. Also applies
 // the texture multiplier to the sampled color
-static void copy_image(struct gl_video *p, int *offset, struct image img)
+static void copy_image(struct gl_video *p, unsigned int *offset, struct image img)
 {
-    int count = img.components;
-    assert(*offset + count <= 4);
-    assert(img.padding + count <= 4);
-
-    int id = pass_bind(p, img);
+    const unsigned int count = img.components;
     char src[5] = {0};
     char dst[5] = {0};
+
+    assert(*offset + count < sizeof(dst));
+    assert(img.padding + count < sizeof(src));
+
+    int id = pass_bind(p, img);
+
     const char *tex_fmt = get_tex_swizzle(&img);
     const char *dst_fmt = "rgba";
-    for (int i = 0; i < count; i++) {
+    for (unsigned int i = 0; i < count; i++) {
         src[i] = tex_fmt[img.padding + i];
         dst[i] = dst_fmt[*offset + i];
     }
@@ -3579,7 +3580,9 @@ static void frame_perf_data(struct pass_info pass[], struct mp_frame_perf *out)
         if (!pass[i].desc.len)
             break;
         out->perf[out->count] = pass[i].perf;
-        out->desc[out->count] = pass[i].desc.start;
+        strncpy(out->desc[out->count], pass[i].desc.start,
+                sizeof(out->desc[out->count]) - 1);
+        out->desc[out->count][sizeof(out->desc[out->count]) - 1] = '\0';
         out->count++;
     }
 }
@@ -4097,7 +4100,8 @@ static void reinit_from_options(struct gl_video *p)
 
     check_gl_features(p);
     uninit_rendering(p);
-    gl_sc_set_cache_dir(p->sc, p->opts.shader_cache_dir);
+    if (p->opts.shader_cache)
+        gl_sc_set_cache_dir(p->sc, p->opts.shader_cache_dir);
     p->ra->use_pbo = p->opts.pbo;
     gl_video_setup_hooks(p);
     reinit_osd(p);

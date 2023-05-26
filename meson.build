@@ -2,7 +2,7 @@ project('mpv',
         'c',
         license: ['GPL2+', 'LGPL2.1+'],
         version: files('./VERSION'),
-        meson_version: '>=0.60.3',
+        meson_version: '>=0.62.0',
         default_options: [
             'buildtype=debugoptimized',
             'b_lundef=false',
@@ -293,6 +293,8 @@ endif
 darwin = host_machine.system() == 'darwin'
 win32 = host_machine.system() == 'cygwin' or host_machine.system() == 'windows'
 posix = not win32
+
+features += {'darwin': darwin}
 features += {'posix': posix}
 features += {'dos-paths': win32, 'win32': win32}
 
@@ -327,10 +329,10 @@ endif
 
 features += {'ta-leak-report': get_option('ta-leak-report')}
 
-libdl_dep = cc.find_library('dl', required: false)
-features += {'libdl': cc.has_function('dlopen', dependencies: libdl_dep, prefix: '#include <dlfcn.h>')}
+libdl = dependency('dl', required: false)
+features += {'libdl': libdl.found()}
 if features['libdl']
-    dependencies += libdl_dep
+    dependencies += libdl
 endif
 
 cplugins = get_option('cplugins').require(
@@ -407,11 +409,14 @@ if posix and not features['cocoa']
 endif
 
 if darwin
-    sources += files('osdep/timer-darwin.c')
+    path_source = files('osdep/path-darwin.c')
+    sources += path_source + files('osdep/timer-darwin.c')
+                     
 endif
 
 if posix and not darwin
-    sources += files('osdep/timer-linux.c')
+    sources += files('osdep/path-unix.c',
+                     'osdep/timer-linux.c')
 endif
 
 cd_devices = {
@@ -477,6 +482,7 @@ if features['win32-desktop']
                           cc.find_library('gdi32'),
                           cc.find_library('ole32'),
                           cc.find_library('uuid'),
+                          cc.find_library('uxtheme'),
                           cc.find_library('version'),
                           cc.find_library('winmm')]
     dependencies += win32_desktop_libs
@@ -911,20 +917,20 @@ endif
 
 libplacebo = dependency('libplacebo', version: '>=4.157.0', required: get_option('libplacebo'))
 features += {'libplacebo': libplacebo.found()}
-features += {'libplacebo-next': false}
 if features['libplacebo']
     dependencies += libplacebo
     sources += files('video/out/placebo/ra_pl.c',
                      'video/out/placebo/utils.c')
-    pl_api_ver = libplacebo.version().split('.')[1]
-    if pl_api_ver.version_compare('>=202')
-        features += {'libplacebo-next': true}
-        message('libplacebo v4.202+ found! Enabling vo_gpu_next.')
-        sources += files('video/out/vo_gpu_next.c',
-                         'video/out/gpu_next/context.c')
-    else
-        message('libplacebo v4.202+ not found! Disabling vo_gpu_next.')
-    endif
+endif
+
+libplacebo_next = get_option('libplacebo-next').require(
+    features['libplacebo'] and libplacebo.version().version_compare('>=5.264.0'),
+    error_message: 'libplacebo v5.264.0+ was not found!',
+)
+features += {'libplacebo-next': libplacebo_next.allowed()}
+if features['libplacebo-next']
+    sources += files('video/out/vo_gpu_next.c',
+                     'video/out/gpu_next/context.c')
 endif
 
 sdl2_video = get_option('sdl2-video').require(
@@ -1104,9 +1110,14 @@ if features['gl-dxinterop']
 endif
 
 egl_angle = get_option('egl-angle').require(
-    features['gl-win32'] and cc.has_header_symbol('EGL/eglext.h',
-                                                  'EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE',
-                                                  prefix: '#include <EGL/egl.h>'),
+    features['gl-win32'] and
+        cc.has_header_symbol('EGL/eglext.h',
+                             'EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE',
+                             prefix: '#include <EGL/egl.h>') and
+        cc.has_header_symbol('EGL/eglext_angle.h',
+                             'PFNEGLCREATEDEVICEANGLEPROC',
+                             # TODO: change to list when meson 1.0.0 is required
+                             prefix: '#include <EGL/egl.h>\n#include <EGL/eglext.h>'),
     error_message: 'egl-angle could not be found!',
 )
 features += {'egl-angle': egl_angle.allowed()}
@@ -1409,7 +1420,6 @@ if features['dmabuf-wayland']
     sources += files('video/out/hwdec/dmabuf_interop_wl.c')
     sources += files('video/out/wldmabuf/context_wldmabuf.c')
     sources += files('video/out/wldmabuf/ra_wldmabuf.c')
-    sources += files('video/out/wlbuf_pool.c')
 endif
 
 vdpau_opt = get_option('vdpau').require(
@@ -1586,23 +1596,32 @@ endif
 rst2pdf = find_program('rst2pdf', required: get_option('pdf-build'))
 features += {'pdf-build': rst2pdf.found()}
 if features['pdf-build']
+    dependency_file = rst2pdf.version().version_compare('>=0.100')
     datadir = get_option('datadir')
     custom_target('pdf-manpages',
         input: manpage,
         output: 'mpv.pdf',
-        command: [rst2pdf, '-c', '-b', '1', '--repeat-table-rows', '@INPUT@', '-o', '@OUTPUT@'],
+        command: [
+            docutils_wrapper, rst2pdf,
+            '-c', '-b', '1', '--repeat-table-rows',
+            dependency_file ? ['--record-dependencies', '@DEPFILE@'] : [],
+            '@INPUT@', '-o', '@OUTPUT@'],
+        depfile: 'mpv.pdf.dep',
         install: true,
         install_dir: join_paths(datadir, 'doc', 'mpv')
     )
 endif
 
 
-# Currently, we can't easily get every single thing a user might have passed
-# on the cli, but we might as well just hardcode a few options (even if they are
-# not specifically set) for verbosity's sake.
-configuration = 'meson configure build ' + '-Dprefix=' + get_option('prefix') + \
-                ' -Dbuildtype=' + get_option('buildtype') + \
-                ' -Doptimization=' + get_option('optimization')
+if meson.version().version_compare('>= 1.1.0')
+    configuration = meson.build_options()
+else
+    # Arbitrary hardcoded things to pass if the meson version is too
+    # old to have the build_options method.
+    configuration = 'meson configure build ' + '-Dprefix=' + get_option('prefix') + \
+                    ' -Dbuildtype=' + get_option('buildtype') + \
+                    ' -Doptimization=' + get_option('optimization')
+endif
 
 
 # Set config.h

@@ -55,6 +55,10 @@
 #define HAVE_WAYLAND_1_20
 #endif
 
+#if WAYLAND_VERSION_MAJOR > 1 || WAYLAND_VERSION_MINOR >= 22
+#define HAVE_WAYLAND_1_22
+#endif
+
 #ifndef CLOCK_MONOTONIC_RAW
 #define CLOCK_MONOTONIC_RAW 4
 #endif
@@ -143,7 +147,7 @@ const struct m_sub_options wayland_conf = {
     .size = sizeof(struct wayland_opts),
     .defaults = &(struct wayland_opts) {
         .configure_bounds = -1,
-        .edge_pixels_pointer = 10,
+        .edge_pixels_pointer = 16,
         .edge_pixels_touch = 32,
     },
 };
@@ -171,8 +175,8 @@ struct vo_wayland_output {
     struct wl_list link;
 };
 
-static int check_for_resize(struct vo_wayland_state *wl, wl_fixed_t x_w, wl_fixed_t y_w,
-                            int edge_pixels, enum xdg_toplevel_resize_edge *edge);
+static int check_for_resize(struct vo_wayland_state *wl, int edge_pixels,
+                            enum xdg_toplevel_resize_edge *edge);
 static int get_mods(struct vo_wayland_state *wl);
 static int lookupkey(int key);
 static int set_cursor_visibility(struct vo_wayland_state *wl, bool on);
@@ -181,6 +185,7 @@ static int spawn_cursor(struct vo_wayland_state *wl);
 static void add_feedback(struct vo_wayland_feedback_pool *fback_pool,
                          struct wp_presentation_feedback *fback);
 static void greatest_common_divisor(struct vo_wayland_state *wl, int a, int b);
+static void guess_focus(struct vo_wayland_state *wl);
 static void remove_feedback(struct vo_wayland_feedback_pool *fback_pool,
                             struct wp_presentation_feedback *fback);
 static void remove_output(struct vo_wayland_output *out);
@@ -218,8 +223,6 @@ static void pointer_handle_motion(void *data, struct wl_pointer *pointer,
 
     wl->mouse_x = wl_fixed_to_int(sx) * wl->scaling;
     wl->mouse_y = wl_fixed_to_int(sy) * wl->scaling;
-    wl->mouse_unscaled_x = sx;
-    wl->mouse_unscaled_y = sy;
 
     if (!wl->toplevel_configured)
         mp_input_set_mouse_pos(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y);
@@ -269,16 +272,16 @@ static void pointer_handle_button(void *data, struct wl_pointer *wl_pointer,
 
     if (!mp_input_test_dragging(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y) &&
         (!wl->vo_opts->fullscreen) && (!wl->vo_opts->window_maximized) &&
-        (button == MP_MBTN_LEFT) && (state == MP_KEY_STATE_DOWN)) {
+        (button == MP_MBTN_LEFT) && (state == MP_KEY_STATE_DOWN))
+    {
         uint32_t edges;
         // Implement an edge resize zone if there are no decorations
-        if (!wl->vo_opts->border &&
-            check_for_resize(wl, wl->mouse_unscaled_x, wl->mouse_unscaled_y,
-                             wl->opts->edge_pixels_pointer, &edges))
+        if (!wl->vo_opts->border && check_for_resize(wl, wl->opts->edge_pixels_pointer, &edges)) {
             xdg_toplevel_resize(wl->xdg_toplevel, wl->seat, serial, edges);
-        else
+        } else {
             window_move(wl, serial);
-        // Explictly send an UP event after the client finishes a move/resize
+        }
+        // Explicitly send an UP event after the client finishes a move/resize
         mp_input_put_key(wl->vo->input_ctx, button | MP_KEY_STATE_UP);
     }
 }
@@ -324,7 +327,7 @@ static void touch_handle_down(void *data, struct wl_touch *wl_touch,
 
     enum xdg_toplevel_resize_edge edge;
     if (!mp_input_test_dragging(wl->vo->input_ctx, wl->mouse_x, wl->mouse_y)) {
-        if (check_for_resize(wl, x_w, y_w, wl->opts->edge_pixels_touch, &edge)) {
+        if (check_for_resize(wl, wl->opts->edge_pixels_touch, &edge)) {
             xdg_toplevel_resize(wl->xdg_toplevel, wl->seat, serial, edge);
         } else  {
             xdg_toplevel_move(wl->xdg_toplevel, wl->seat, serial);
@@ -413,6 +416,7 @@ static void keyboard_handle_enter(void *data, struct wl_keyboard *wl_keyboard,
 {
     struct vo_wayland_state *wl = data;
     wl->has_keyboard_input = true;
+    guess_focus(wl);
 }
 
 static void keyboard_handle_leave(void *data, struct wl_keyboard *wl_keyboard,
@@ -420,6 +424,7 @@ static void keyboard_handle_leave(void *data, struct wl_keyboard *wl_keyboard,
 {
     struct vo_wayland_state *wl = data;
     wl->has_keyboard_input = false;
+    guess_focus(wl);
 }
 
 static void keyboard_handle_key(void *data, struct wl_keyboard *wl_keyboard,
@@ -758,7 +763,9 @@ static void surface_handle_enter(void *data, struct wl_surface *wl_surface,
     wl->current_output->has_surface = true;
     bool force_resize = false;
 
-    if (!wl->fractional_scale_manager && wl->scaling != wl->current_output->scale) {
+    if (!wl->fractional_scale_manager && wl_surface_get_version(wl_surface) < 6 &&
+        wl->scaling != wl->current_output->scale)
+    {
         set_surface_scaling(wl);
         spawn_cursor(wl);
         force_resize = true;
@@ -794,9 +801,45 @@ static void surface_handle_leave(void *data, struct wl_surface *wl_surface,
     }
 }
 
+#ifdef HAVE_WAYLAND_1_22
+
+static void surface_handle_preferred_buffer_scale(void *data,
+                                                  struct wl_surface *wl_surface,
+                                                  int32_t scale)
+{
+    struct vo_wayland_state *wl = data;
+    double old_scale = wl->scaling;
+
+    if (wl->fractional_scale_manager)
+        return;
+
+    // dmabuf_wayland is always wl->scaling = 1
+    wl->scaling = !wl->using_dmabuf_wayland ? scale : 1;
+    MP_VERBOSE(wl, "Obtained preferred scale, %f, from the compositor.\n",
+               wl->scaling);
+    wl->pending_vo_events |= VO_EVENT_DPI;
+    if (wl->current_output) {
+        rescale_geometry(wl, old_scale);
+        set_geometry(wl, false);
+        wl->pending_vo_events |= VO_EVENT_RESIZE;
+    }
+}
+
+static void surface_handle_preferred_buffer_transform(void *data,
+                                                      struct wl_surface *wl_surface,
+                                                      uint32_t transform)
+{
+}
+
+#endif
+
 static const struct wl_surface_listener surface_listener = {
     surface_handle_enter,
     surface_handle_leave,
+#ifdef HAVE_WAYLAND_1_22
+    surface_handle_preferred_buffer_scale,
+    surface_handle_preferred_buffer_transform,
+#endif
 };
 
 static void xdg_wm_base_ping(void *data, struct xdg_wm_base *wm_base, uint32_t serial)
@@ -883,12 +926,7 @@ static void handle_toplevel_config(void *data, struct xdg_toplevel *toplevel,
 
     if (wl->activated != is_activated) {
         wl->activated = is_activated;
-        if ((!wl->focused && wl->activated && wl->has_keyboard_input) ||
-            (wl->focused && !wl->activated))
-        {
-            wl->focused = !wl->focused;
-            wl->pending_vo_events |= VO_EVENT_FOCUS;
-        }
+        guess_focus(wl);
         /* Just force a redraw to be on the safe side. */
         if (wl->activated) {
             wl->hidden = false;
@@ -956,8 +994,8 @@ static void handle_configure_bounds(void *data, struct xdg_toplevel *xdg_topleve
                                     int32_t width, int32_t height)
 {
     struct vo_wayland_state *wl = data;
-    wl->bounded_width = width;
-    wl->bounded_height = height;
+    wl->bounded_width = width * wl->scaling;
+    wl->bounded_height = height * wl->scaling;
 }
 #endif
 
@@ -1075,7 +1113,7 @@ static void feedback_presented(void *data, struct wp_presentation_feedback *fbac
     // Notes:
     //  - tv_sec_lo + tv_sec_hi is the equivalent of oml's ust
     //  - seq_lo + seq_hi is the equivalent of oml's msc
-    //  - these values are updated everytime the compositor receives feedback.
+    //  - these values are updated every time the compositor receives feedback.
 
     int64_t sec = (uint64_t) tv_sec_lo + ((uint64_t) tv_sec_hi << 32);
     int64_t ust = sec * 1000000LL + (uint64_t) tv_nsec / 1000;
@@ -1209,7 +1247,12 @@ static void registry_handle_add(void *data, struct wl_registry *reg, uint32_t id
     struct vo_wayland_state *wl = data;
 
     if (!strcmp(interface, wl_compositor_interface.name) && (ver >= 4) && found++) {
-        wl->compositor = wl_registry_bind(reg, id, &wl_compositor_interface, 4);
+#ifdef HAVE_WAYLAND_1_22
+        ver = MPMIN(ver, 6); /* Cap at 6 in case new events are added later. */
+#else
+        ver = 4;
+#endif
+        wl->compositor = wl_registry_bind(reg, id, &wl_compositor_interface, ver);
         wl->surface = wl_compositor_create_surface(wl->compositor);
         wl->video_surface = wl_compositor_create_surface(wl->compositor);
         /* never accept input events on the video surface */
@@ -1374,13 +1417,13 @@ end:
     }
 }
 
-static int check_for_resize(struct vo_wayland_state *wl, wl_fixed_t x_w, wl_fixed_t y_w,
-                            int edge_pixels, enum xdg_toplevel_resize_edge *edge)
+static int check_for_resize(struct vo_wayland_state *wl, int edge_pixels,
+                            enum xdg_toplevel_resize_edge *edge)
 {
     if (wl->vo_opts->fullscreen || wl->vo_opts->window_maximized)
         return 0;
 
-    int pos[2] = { wl_fixed_to_double(x_w), wl_fixed_to_double(y_w) };
+    int pos[2] = { wl->mouse_x, wl->mouse_y };
     int left_edge   = pos[0] < edge_pixels;
     int top_edge    = pos[1] < edge_pixels;
     int right_edge  = pos[0] > (mp_rect_w(wl->geometry) - edge_pixels);
@@ -1445,7 +1488,7 @@ static int create_xdg_surface(struct vo_wayland_state *wl)
     xdg_toplevel_add_listener(wl->xdg_toplevel, &xdg_toplevel_listener, wl);
 
     if (!wl->xdg_surface || !wl->xdg_toplevel) {
-        MP_ERR(wl, "failled to create xdg_surface and xdg_toplevel!\n");
+        MP_ERR(wl, "failed to create xdg_surface and xdg_toplevel!\n");
         return 1;
     }
     return 0;
@@ -1535,6 +1578,18 @@ static void greatest_common_divisor(struct vo_wayland_state *wl, int a, int b) {
     } else {
         greatest_common_divisor(wl, smaller, remainder);
     }
+}
+
+static void guess_focus(struct vo_wayland_state *wl) {
+    // We can't actually know if the window is focused or not in wayland,
+    // so just guess it with some common sense. Obviously won't work if
+    // the user has no keyboard.
+    if ((!wl->focused && wl->activated && wl->has_keyboard_input) ||
+        (wl->focused && !wl->activated))
+     {
+         wl->focused = !wl->focused;
+         wl->pending_vo_events |= VO_EVENT_FOCUS;
+     }
 }
 
 static struct vo_wayland_output *find_output(struct vo_wayland_state *wl)
@@ -2416,7 +2471,7 @@ void vo_wayland_wait_frame(struct vo_wayland_state *wl)
     /* We need some vblank interval to use for the timeout in
      * this function. The order of preference of values to use is:
      * 1. vsync duration from presentation time
-     * 2. refresh inteval reported by presentation time
+     * 2. refresh interval reported by presentation time
      * 3. refresh rate of the output reported by the compositor
      * 4. make up crap if vblank_time is still <= 0 (better than nothing) */
 

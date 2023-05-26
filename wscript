@@ -156,6 +156,11 @@ main_dependencies = [
         'desc': 'POSIX environment',
         'func': check_statement(['unistd.h'], 'long x = _POSIX_VERSION'),
     }, {
+        'name': 'darwin',
+        'desc': 'Darwin environment',
+        'deps': 'os-darwin',
+        'func': check_true,
+    }, {
         'name': '--android',
         'desc': 'Android environment',
         'func': check_statement('android/api-level.h', '(void)__ANDROID__'),  # arbitrary android-specific header
@@ -201,7 +206,14 @@ main_dependencies = [
         'name': 'win32-desktop',
         'desc': 'win32 desktop APIs',
         'deps': '(os-win32 || os-cygwin) && !uwp',
-        'func': check_cc(lib=['winmm', 'gdi32', 'ole32', 'uuid', 'avrt', 'dwmapi', 'version']),
+        'func': check_cc(lib=['avrt',
+                              'dwmapi',
+                              'gdi32',
+                              'ole32',
+                              'uuid',
+                              'uxtheme',
+                              'version',
+                              'winmm']),
     }, {
         'name': '--win32-internal-pthreads',
         'desc': 'internal pthread wrapper for win32 (Vista+)',
@@ -405,7 +417,7 @@ iconv support use --disable-iconv.",
         'func': check_pkg_config('rubberband >= 3.0.0'),
     }, {
         'name': 'zimg-st428',
-        'desc': 'ZIMG suport for ZIMG_TRANSFER_ST428',
+        'desc': 'ZIMG support for ZIMG_TRANSFER_ST428',
         'func': check_pkg_config('zimg', '>= 3.0.5'),
     }
 ]
@@ -637,8 +649,9 @@ video_output_features = [
         'desc': 'OpenGL ANGLE headers',
         'deps': 'os-win32 || os-cygwin',
         'groups': [ 'gl' ],
-        'func': check_statement(['EGL/egl.h', 'EGL/eglext.h'],
-                                'int x = EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE')
+        'func': check_statement(['EGL/egl.h', 'EGL/eglext.h', 'EGL/eglext_angle.h'],
+                                'int x = EGL_D3D_TEXTURE_2D_SHARE_HANDLE_ANGLE; '
+                                'PFNEGLCREATEDEVICEANGLEPROC y = NULL')
     } , {
         'name': '--egl-angle-lib',
         'desc': 'OpenGL Win32 ANGLE Library',
@@ -779,10 +792,10 @@ video_output_features = [
         'desc': 'libplacebo support',
         'func': check_pkg_config('libplacebo >= 4.157.0'),
     }, {
-        'name': 'libplacebo-next',
-        'desc': 'libplacebo v4.202+, needed for vo_gpu_next',
+        'name': '--libplacebo-next',
+        'desc': 'libplacebo v5.264.0+, needed for vo_gpu_next',
         'deps': 'libplacebo',
-        'func': check_preprocessor('libplacebo/config.h', 'PL_API_VER >= 202',
+        'func': check_preprocessor('libplacebo/config.h', 'PL_API_VER >= 264',
                                    use='libplacebo'),
     }, {
         'name': '--vulkan',
