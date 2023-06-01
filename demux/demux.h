@@ -358,4 +358,5 @@ bool demux_matroska_uid_cmp(struct matroska_segment_uid *a,
 
 const char *stream_type_name(enum stream_type type);
 
+struct mp_image *demux_thumb(struct demuxer *demuxer, double pts);
 #endif /* MPLAYER_DEMUXER_H */

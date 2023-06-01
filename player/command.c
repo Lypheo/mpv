@@ -74,6 +74,7 @@
 #include "osdep/subprocess.h"
 
 #include "core.h"
+#include "video/sws_utils.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -6358,6 +6359,42 @@ static void cmd_dump_cache_ab(void *p)
                  cmd->args[0].v.s);
 }
 
+// thumb 49 5 100 100 300 300
+static void cmd_thumb(void *p) {
+    struct mp_cmd_ctx *cmd = p;
+    struct MPContext *mpctx = cmd->mpctx;
+
+    int id = cmd->args[0].v.i;
+    double v = cmd->args[1].v.d * cmd->cmd->scale;
+    int x = cmd->args[2].v.i, y = cmd->args[3].v.i,
+        w = cmd->args[4].v.i, h = cmd->args[5].v.i;
+    struct mp_image* rgb;
+    if (v < 0) { // only shift overlay
+        if (id >= mpctx->command_ctx->num_overlays || !mpctx->command_ctx->overlays[id].source)
+            return;
+        rgb = mp_image_new_ref(mpctx->command_ctx->overlays[id].source);
+        goto finish;
+    }
+    struct mp_image* mpi = demux_thumb(mpctx->demuxer, v);
+
+    if (!mpi) {
+        MP_INFO(mpctx, "Retrieving thumbnail at %f failed!\n", v);
+        return;
+    }
+    rgb = mp_image_alloc(IMGFMT_BGRA, w, h);
+    if (mp_image_swscale(rgb, mpi, 0)){
+        MP_WARN(mpctx, "Error converting thumbnail format\n");
+        return;
+    }
+    mp_image_unrefp(&mpi);
+finish:
+    replace_overlay(mpctx, id, &(struct overlay) {
+            .source = rgb,
+            .x = x,
+            .y = y,
+    });
+}
+
 /* This array defines all known commands.
  * The first field the command name used in libmpv and input.conf.
  * The second field is the handler function (see mp_cmd_def.handler and
@@ -6808,6 +6845,14 @@ const struct mp_cmd_def mp_cmds[] = {
     },
 
     { "ab-loop-align-cache", cmd_align_cache_ab },
+    {"thumb", cmd_thumb, {
+                {"id", OPT_INT(v.i)},
+            {"pos", OPT_TIME(v.d)},
+            {"x", OPT_INT(v.i)},
+            {"y", OPT_INT(v.i)},
+            {"w", OPT_INT(v.i)},
+            {"h", OPT_INT(v.i)}
+    }},
 
     {0}
 };

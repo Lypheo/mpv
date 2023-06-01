@@ -27,6 +27,10 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/stat.h>
+#include <libavformat/avformat.h>
+#include <time.h>
+#include <libavutil/cpu.h>
 
 #include "cache.h"
 #include "config.h"
@@ -4620,4 +4624,109 @@ static bool get_demux_sub_opts(int index, const struct m_sub_options **sub)
         return false;
     *sub = demuxer_list[index]->options;
     return true;
+}
+
+// If the given pts is cached, decode and return the closest video frame
+struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
+    clock_t start_time = clock();
+
+    struct demux_internal *in = demuxer->in;
+    struct demux_cached_range *r = find_cache_seek_range(in, pts, 0);
+    if (!r) {
+        MP_VERBOSE(in, "Requested frame not in cache!\n");
+        return NULL;
+    }
+    struct demux_packet *dp;
+    struct mp_codec_params *cp;
+    for (int n = 0; n < in->num_streams; n++) {
+        struct demux_stream *ds = in->streams[n]->ds;
+        if (ds->type == STREAM_VIDEO && ds->selected) {
+            struct demux_queue *q = r->streams[n];
+            dp = find_seek_target(q, pts, 0);
+            cp = ds->sh->codec;
+            break;
+        }
+    }
+    assert(cp);
+    if (!dp || !dp->keyframe){
+        MP_VERBOSE(in, "Error finding thumb seek target\n");
+        return NULL;
+    }
+
+    // find closest frame (search the entire keyframe sequence because pts might not be monotically increasing)
+    struct demux_packet* target = dp, *curr = dp->next;
+    double min_dist = fabs(dp->pts - pts);
+    for (; curr && !curr->keyframe; curr = curr->next) {
+        double dist = fabs(curr->pts - pts);
+        if (dist < min_dist) {
+            target = curr;
+            min_dist = dist;
+        }
+    }
+    MP_DBG(in, "thumb target pts: %f\n", target->pts);
+    const AVCodec* codec = avcodec_find_decoder_by_name(cp->codec);
+    if (!codec) {
+        MP_VERBOSE(in, "Error finding thumbnail decoder\n");
+        return NULL;
+    }
+
+    AVCodecContext* decoder_ctx = avcodec_alloc_context3(codec);
+    AVCodecParameters *avp = mp_codec_params_to_av(cp);
+    avcodec_parameters_to_context(decoder_ctx, avp);
+    avcodec_parameters_free(&avp);
+    AVRational tb = mp_get_codec_timebase(cp);
+    decoder_ctx->pkt_timebase = tb;
+    decoder_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+    decoder_ctx->skip_loop_filter = true;
+    decoder_ctx->skip_idct = true;
+    decoder_ctx->skip_frame = true;
+    decoder_ctx->thread_count =  MPMAX(av_cpu_count() / 2, 1);
+
+    if (avcodec_open2(decoder_ctx, codec, NULL)) {
+        MP_VERBOSE(in, "Error opening thumbnail decoder\n");
+        return NULL;
+    }
+
+    int ret;
+    AVFrame* frame = av_frame_alloc();
+    int64_t target_pts = -1;
+    for (;;) {
+        if (dp) {
+            AVPacket* pkt = av_packet_alloc();
+            mp_set_av_packet(pkt, demux_copy_packet(dp), &tb);
+            if (dp == target)
+                target_pts = pkt->pts;
+            ret = avcodec_send_packet(decoder_ctx, pkt);
+            av_packet_free(&pkt);
+
+            if (ret < 0) {
+                MP_VERBOSE(in, "Error sending a packet for decoding\n");
+                return NULL;
+            }
+            dp = dp->next && !dp->next->keyframe ? dp->next : NULL;
+
+        } else {
+            avcodec_send_packet(decoder_ctx, NULL);
+        }
+        bool done = false;
+        while ((ret = avcodec_receive_frame(decoder_ctx, frame)) == 0) {
+            if (frame->pts == target_pts) {
+                done = true;
+                break;
+            }
+        }
+        if (done)
+            break;
+        else if (ret != AVERROR(EAGAIN)) {
+            MP_VERBOSE(in, "Error during decoding\n");
+            return NULL;
+        }
+    }
+//    printf("Decoding done after %f seconds\n", (double)(clock() - start_time) / CLOCKS_PER_SEC);
+
+    struct mp_image *mpi = mp_image_from_av_frame(frame);
+    av_frame_free(&frame);
+    avcodec_free_context(&decoder_ctx);
+
+    return mpi;
 }
