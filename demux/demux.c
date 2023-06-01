@@ -30,6 +30,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <libavformat/avformat.h>
+#include <libavutil/cpu.h>
 
 #include "cache.h"
 #include "config.h"
@@ -4700,6 +4701,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
     decoder_ctx->skip_loop_filter = true;
     decoder_ctx->skip_idct = true;
     decoder_ctx->skip_frame = true;
+    decoder_ctx->thread_count =  MPMAX(av_cpu_count(), 1) + 1;
 
     if (avcodec_open2(decoder_ctx, codec, NULL)) {
         MP_ERR(in, "Error opening dec\n");
