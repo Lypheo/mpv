@@ -6253,12 +6253,12 @@ static void cmd_thumb(void *p) {
     struct mp_image* mpi = demux_thumb(mpctx->demuxer, v);
 
     if (!mpi) {
-        MP_VERBOSE(mpctx, "Retrieving thumbnail at %f failed!\n", v);
+        MP_INFO(mpctx, "Retrieving thumbnail at %f failed!\n", v);
         return;
     }
     struct mp_image* rgb = mp_image_alloc(IMGFMT_BGRA, w, h);
     if (mp_image_swscale(rgb, mpi, 0)){
-        MP_ERR(mpctx, "Error thumbnail converting format\n");
+        MP_WARN(mpctx, "Error converting thumbnail format\n");
         return;
     }
     mp_image_unrefp(&mpi);

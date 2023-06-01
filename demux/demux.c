@@ -4670,7 +4670,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
     }
     assert(cp);
     if (!dp || !dp->keyframe){
-        MP_ERR(in, "Error finding seek target\n");
+        MP_VERBOSE(in, "Error finding thumb seek target\n");
         return NULL;
     }
 
@@ -4687,7 +4687,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
     MP_DBG(in, "thumb target pts: %f\n", target->pts);
     const AVCodec* codec = avcodec_find_decoder_by_name(cp->codec);
     if (!codec) {
-        MP_ERR(in, "Error finding decoder\n");
+        MP_VERBOSE(in, "Error finding thumbnail decoder\n");
         return NULL;
     }
 
@@ -4704,7 +4704,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
     decoder_ctx->thread_count =  MPMAX(av_cpu_count(), 1) + 1;
 
     if (avcodec_open2(decoder_ctx, codec, NULL)) {
-        MP_ERR(in, "Error opening dec\n");
+        MP_VERBOSE(in, "Error opening thumbnail decoder\n");
         return NULL;
     }
 
@@ -4721,7 +4721,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
             av_packet_free(&pkt);
 
             if (ret < 0) {
-                MP_ERR(in, "Error sending a packet for decoding\n");
+                MP_VERBOSE(in, "Error sending a packet for decoding\n");
                 return NULL;
             }
             dp = dp->next && !dp->next->keyframe ? dp->next : NULL;
@@ -4739,7 +4739,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
         if (done)
             break;
         else if (ret != AVERROR(EAGAIN)) {
-            MP_ERR(in, "Error during decoding\n");
+            MP_VERBOSE(in, "Error during decoding\n");
             return NULL;
         }
     }
