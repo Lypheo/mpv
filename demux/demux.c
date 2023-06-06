@@ -4649,7 +4649,7 @@ static bool get_demux_sub_opts(int index, const struct m_sub_options **sub)
 
 // If the given pts is cached, decode and return the closest video frame
 struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
-//    clock_t start_time = clock();
+    clock_t start_time = clock();
 
     struct demux_internal *in = demuxer->in;
     struct demux_cached_range *r = find_cache_seek_range(in, pts, 0);
@@ -4701,7 +4701,7 @@ struct mp_image* demux_thumb(struct demuxer *demuxer, double pts) {
     decoder_ctx->skip_loop_filter = true;
     decoder_ctx->skip_idct = true;
     decoder_ctx->skip_frame = true;
-    decoder_ctx->thread_count =  MPMAX(av_cpu_count(), 1) + 1;
+    decoder_ctx->thread_count =  MPMAX(av_cpu_count() / 2, 1);
 
     if (avcodec_open2(decoder_ctx, codec, NULL)) {
         MP_VERBOSE(in, "Error opening thumbnail decoder\n");

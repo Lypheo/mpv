@@ -6250,18 +6250,26 @@ static void cmd_thumb(void *p) {
     double v = cmd->args[1].v.d * cmd->cmd->scale;
     int x = cmd->args[2].v.i, y = cmd->args[3].v.i,
         w = cmd->args[4].v.i, h = cmd->args[5].v.i;
+    struct mp_image* rgb;
+    if (v < 0) { // only shift overlay
+        if (id >= mpctx->command_ctx->num_overlays || !mpctx->command_ctx->overlays[id].source)
+            return;
+        rgb = mp_image_new_ref(mpctx->command_ctx->overlays[id].source);
+        goto finish;
+    }
     struct mp_image* mpi = demux_thumb(mpctx->demuxer, v);
 
     if (!mpi) {
         MP_INFO(mpctx, "Retrieving thumbnail at %f failed!\n", v);
         return;
     }
-    struct mp_image* rgb = mp_image_alloc(IMGFMT_BGRA, w, h);
+    rgb = mp_image_alloc(IMGFMT_BGRA, w, h);
     if (mp_image_swscale(rgb, mpi, 0)){
         MP_WARN(mpctx, "Error converting thumbnail format\n");
         return;
     }
     mp_image_unrefp(&mpi);
+finish:
     replace_overlay(mpctx, id, &(struct overlay) {
             .source = rgb,
             .x = x,
