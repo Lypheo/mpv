@@ -285,7 +285,6 @@ const struct m_sub_options mp_subtitle_sub_opts = {
         {"sub-fps", OPT_FLOAT(sub_fps)},
         {"sub-speed", OPT_FLOAT(sub_speed)},
         {"sub-visibility", OPT_BOOL(sub_visibility)},
-        {"secondary-sub-visibility", OPT_BOOL(sec_sub_visibility)},
         {"sub-forced-events-only", OPT_BOOL(sub_forced_events_only)},
         {"stretch-dvd-subs", OPT_BOOL(stretch_dvd_subs)},
         {"stretch-image-subs-to-screen", OPT_BOOL(stretch_image_subs)},
@@ -361,6 +360,8 @@ const struct m_sub_options mp_subtitle_sub2_opts = {
             {"secondary-stretch-image-subs-to-screen", OPT_BOOL(stretch_image_subs)},
             {"secondary-image-subs-video-resolution", OPT_BOOL(image_subs_video_res)},
             {"secondary-sub-fix-timing", OPT_BOOL(sub_fix_timing)},
+            {"secondary-sub-stretch-durations", OPT_BOOL(sub_stretch_durations)},
+
             {"secondary-sub-pos", OPT_FLOAT(sub_pos), M_RANGE(0, 150)},
             {"secondary-sub-gauss", OPT_FLOAT(sub_gauss), M_RANGE(0.0, 3.0)},
             {"secondary-sub-gray", OPT_BOOL(sub_gray)},
@@ -375,7 +376,7 @@ const struct m_sub_options mp_subtitle_sub2_opts = {
                                                              {"no", 0}, {"basic", 1}, {"full", 2}, {"force-601", 3})},
             {"secondary-sub-ass-vsfilter-blur-compat", OPT_BOOL(ass_vsfilter_blur_compat)},
             {"secondary-embeddedfonts", OPT_BOOL(use_embedded_fonts), .flags = UPDATE_SUB_HARD},
-            {"secondary-sub-ass-force-style", OPT_STRINGLIST(ass_force_style_list),
+            {"secondary-sub-ass-style-overrides", OPT_STRINGLIST(ass_style_override_list),
                     .flags = UPDATE_SUB_HARD},
             {"secondary-sub-ass-styles", OPT_STRING(ass_styles_file),
                     .flags = M_OPT_FILE | UPDATE_SUB_HARD},
@@ -394,6 +395,8 @@ const struct m_sub_options mp_subtitle_sub2_opts = {
             {"secondary-teletext-page", OPT_INT(teletext_page), M_RANGE(1, 999)},
             {"secondary-sub-past-borders", OPT_BOOL(sub_past_borders)},
             {"secondary-sub-on-top", OPT_BOOL(on_top)},
+            {"secondary-sub-ass-force-style", OPT_REPLACED("sub-ass-style-overrides")},
+
             {0}
     },
     .size = sizeof(OPT_BASE_STRUCT),

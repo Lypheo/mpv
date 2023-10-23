@@ -493,8 +493,8 @@ bool sub_is_visible(struct dec_sub *sub)
 }
 
 int sub_get_order(struct dec_sub *sub) {
-    pthread_mutex_lock(&sub->lock);
+    mp_mutex_lock(&sub->lock);
     int res = sub->order;
-    pthread_mutex_unlock(&sub->lock);
+    mp_mutex_unlock(&sub->lock);
     return res;
 }
