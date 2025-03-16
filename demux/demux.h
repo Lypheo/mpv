@@ -358,5 +358,16 @@ bool demux_matroska_uid_cmp(struct matroska_segment_uid *a,
 
 const char *stream_type_name(enum stream_type type);
 
+struct mp_codec_params* thumb_get_codec_params(struct demuxer *demuxer);
+// void thumb_get_packets(struct demuxer *demuxer, double pts, struct demux_packet **start, struct demux_packet **end);
+void thumb_get_start(struct demuxer *demuxer, double pts, struct demux_packet **start);
+void thumb_get_end(struct demuxer *demuxer, double pts, struct demux_packet *start, struct demux_packet **end);
 struct mp_image *demux_thumb(struct demuxer *demuxer, double pts);
+
+struct mp_image* thumb_get_image(struct demuxer *demuxer);
+void thumb_seek(struct demuxer *demuxer, double pts);
+
+void thumb_start_worker(struct demuxer *demuxer, void (*wakeup_cb)(void *ctx), void *ctx);
+void thumb_stop_worker(struct demuxer *demuxer);
+
 #endif /* MPLAYER_DEMUXER_H */

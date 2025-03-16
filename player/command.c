@@ -29,6 +29,7 @@
 #include <ass/ass.h>
 #include <libavutil/avstring.h>
 #include <libavutil/common.h>
+#include <libavutil/cpu.h>
 
 #include "mpv_talloc.h"
 #include "client.h"
@@ -40,8 +41,8 @@
 #include "common/stats.h"
 #include "filters/f_decoder_wrapper.h"
 #include "command.h"
-#include "osdep/threads.h"
 #include "osdep/timer.h"
+#include "osdep/threads.h"
 #include "common/common.h"
 #include "input/input.h"
 #include "input/keycodes.h"
@@ -80,6 +81,8 @@
 #include <windows.h>
 #endif
 
+#define THUMBD_ID 42
+
 struct command_ctx {
     // All properties, terminated with a {0} item.
     struct m_property *properties;
@@ -113,6 +116,19 @@ struct command_ctx {
 
     double cached_window_scale;
     bool shared_script_warning;
+
+    struct thumb_ctx {
+        mp_thread thread;
+        mp_cond cond;
+
+        mp_mutex lock;
+        bool new_request;
+        bool new_thumb;
+        bool should_terminate;
+        int x, y, w, h;
+        double req_pts;
+        int64_t last_update;
+    } thumb;
 };
 
 static const struct m_option script_props_type = {
@@ -6359,40 +6375,116 @@ static void cmd_dump_cache_ab(void *p)
                  cmd->args[0].v.s);
 }
 
-// thumb 49 5 100 100 300 300
-static void cmd_thumb(void *p) {
-    struct mp_cmd_ctx *cmd = p;
-    struct MPContext *mpctx = cmd->mpctx;
-
-    int id = cmd->args[0].v.i;
-    double v = cmd->args[1].v.d * cmd->cmd->scale;
-    int x = cmd->args[2].v.i, y = cmd->args[3].v.i,
-        w = cmd->args[4].v.i, h = cmd->args[5].v.i;
-    struct mp_image* rgb;
-    if (v < 0) { // only shift overlay
-        if (id >= mpctx->command_ctx->num_overlays || !mpctx->command_ctx->overlays[id].source)
+static void overlay_thumb(struct MPContext *mpctx, struct mp_image *img) {
+    struct command_ctx *cmd_ctx = mpctx->command_ctx;
+    struct thumb_ctx *ctx = &cmd_ctx->thumb;
+    struct mp_image *rgb;
+    if (img == NULL) { // only shift overlay
+        if (cmd_ctx->overlays[THUMBD_ID].x == ctx->x && cmd_ctx->overlays[THUMBD_ID].y == ctx->y) {
             return;
-        rgb = mp_image_new_ref(mpctx->command_ctx->overlays[id].source);
-        goto finish;
+        }
+        if (mpctx->command_ctx->overlays[THUMBD_ID].source) {
+            rgb = mp_image_new_ref(mpctx->command_ctx->overlays[THUMBD_ID].source);
+            goto finish;
+        } else
+            return;
     }
-    struct mp_image* mpi = demux_thumb(mpctx->demuxer, v);
-
-    if (!mpi) {
-        MP_INFO(mpctx, "Retrieving thumbnail at %f failed!\n", v);
-        return;
-    }
-    rgb = mp_image_alloc(IMGFMT_BGRA, w, h);
-    if (mp_image_swscale(rgb, mpi, 0)){
+    rgb = mp_image_alloc(IMGFMT_BGRA, ctx->w, ctx->h);
+    if (mp_image_swscale(rgb, img, 0)){
         MP_WARN(mpctx, "Error converting thumbnail format\n");
         return;
     }
-    mp_image_unrefp(&mpi);
+    mp_image_unrefp(&img);
 finish:
-    replace_overlay(mpctx, id, &(struct overlay) {
-            .source = rgb,
-            .x = x,
-            .y = y,
+    replace_overlay(mpctx, THUMBD_ID, &(struct overlay) {
+        .source = rgb,
+        .x = ctx->x,
+        .y = ctx->y,
     });
+}
+// in ms
+#define THUMB_INTERVAL 200
+
+static MP_THREAD_VOID thumb_thread(void *p) {
+    struct MPContext *mpctx = p;
+    struct command_ctx *cmd_ctx = mpctx->command_ctx;
+    struct thumb_ctx *ctx = &cmd_ctx->thumb;
+    mp_thread_set_name("thumbnail command worker");
+    MP_VERBOSE(mpctx, "Entering thumbnail thread\n");
+
+    mp_mutex_lock(&ctx->lock);
+    while (!ctx->should_terminate) {
+        // guard against spurious wakeups
+        while (!ctx->should_terminate) {
+            if (ctx->req_pts == MP_NOPTS_VALUE)
+                mp_cond_timedwait(&ctx->cond, &ctx->lock, MP_TIME_MS_TO_NS(INFINITE));
+            else if (!ctx->new_request && !ctx->new_thumb && MP_TIME_NS_TO_MS(mp_time_ns() - ctx->last_update) < THUMB_INTERVAL)
+                mp_cond_timedwait(&ctx->cond, &ctx->lock, MP_TIME_MS_TO_NS(THUMB_INTERVAL));
+            else
+                break;
+        }
+        if (ctx->req_pts == MP_NOPTS_VALUE) continue; // should only happen during shutdown
+        struct mp_image *img = thumb_get_image(mpctx->demuxer);
+        if (img) {
+            overlay_thumb(mpctx, img);
+        }
+        ctx->last_update = mp_time_ns();
+        ctx->new_thumb = ctx->new_request = false;
+        MP_WARN(mpctx, "Timeout: %f\n", MP_TIME_NS_TO_MS(mp_time_ns() - ctx->last_update));
+
+    }
+    mp_mutex_unlock(&ctx->lock);
+    MP_THREAD_RETURN();
+}
+
+
+static void thumb_wakeup_cb(void *p) {
+    struct MPContext *mpctx = p;
+    struct command_ctx *cmd_ctx = mpctx->command_ctx;
+    struct thumb_ctx *ctx = &cmd_ctx->thumb;
+
+    mp_mutex_lock(&ctx->lock);
+    ctx->new_thumb = true;
+    mp_cond_signal(&ctx->cond);
+    mp_mutex_unlock(&ctx->lock);
+}
+
+static void thumb_init(struct MPContext *mpctx) {
+    struct command_ctx *ctx = mpctx->command_ctx;
+    
+    mp_mutex_init(&ctx->thumb.lock);
+    mp_cond_init(&ctx->thumb.cond);
+    ctx->thumb.req_pts = MP_NOPTS_VALUE;
+    ctx->thumb.last_update = INFINITY;
+    mp_thread_create(&ctx->thumb.thread, thumb_thread, mpctx);
+    thumb_start_worker(mpctx->demuxer, thumb_wakeup_cb, mpctx);
+}
+
+static void cmd_thumb(void *p) {
+    struct mp_cmd_ctx *cmd = p;
+    struct MPContext *mpctx = cmd->mpctx;
+    struct command_ctx *cmd_ctx = mpctx->command_ctx;
+    struct thumb_ctx *ctx = &cmd_ctx->thumb;
+
+    if (!ctx->thread)
+        thumb_init(mpctx);
+
+    mp_mutex_lock(&ctx->lock);
+    int mode = cmd->args[0].v.i;
+    if (mode == -1) {
+        ctx->req_pts = MP_NOPTS_VALUE;
+        replace_overlay(mpctx, THUMBD_ID, &(struct overlay){0});
+    } else {
+        ctx->req_pts= cmd->args[1].v.d * cmd->cmd->scale;
+        ctx->x = cmd->args[2].v.i, ctx->y = cmd->args[3].v.i;
+        ctx->w = cmd->args[4].v.i, ctx->h = cmd->args[5].v.i;
+        overlay_thumb(mpctx, NULL);
+        thumb_seek(mpctx->demuxer, ctx->req_pts);
+        ctx->new_request = true;
+        mp_cond_signal(&ctx->cond);
+    }
+    MP_INFO(mpctx, "Thumbnail at %f\n", ctx->req_pts);
+    mp_mutex_unlock(&ctx->lock);
 }
 
 /* This array defines all known commands.
@@ -6867,6 +6959,18 @@ void command_uninit(struct MPContext *mpctx)
     assert(!ctx->cache_dump_cmd); // closing the demuxer must have aborted it
 
     overlay_uninit(mpctx);
+
+    if (ctx->thumb.thread) {
+        mp_mutex_lock(&ctx->thumb.lock);
+        ctx->thumb.should_terminate = true;
+        mp_cond_signal(&ctx->thumb.cond);
+        mp_mutex_unlock(&ctx->thumb.lock);
+        mp_thread_join(ctx->thumb.thread);
+        thumb_stop_worker(mpctx->demuxer);
+    }
+    mp_mutex_destroy(&ctx->thumb.lock);
+    mp_cond_destroy(&ctx->thumb.cond);
+
     ao_hotplug_destroy(ctx->hotplug);
 
     m_option_free(&script_props_type, &ctx->script_props);
@@ -6930,6 +7034,8 @@ void command_init(struct MPContext *mpctx)
 
     node_init(&ctx->udata, MPV_FORMAT_NODE_MAP, NULL);
     talloc_steal(ctx, ctx->udata.u.list);
+
+    ctx->thumb.thread = NULL;
 }
 
 static void command_event(struct MPContext *mpctx, int event, void *arg)
