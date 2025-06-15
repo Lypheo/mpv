@@ -1,3 +1,6 @@
 /subprojects/*
 !/subprojects/packagefiles
 !/subprojects/*.wrap
+.idea/
+.vscode/
+/TOOLS/.clion_run/ninja build.run.xml

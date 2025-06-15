@@ -7064,6 +7064,8 @@ finish:
         .source = rgb,
         .x = ctx->x,
         .y = ctx->y,
+        .dw = ctx->w,
+        .dh = ctx->h,
     });
 }
 // in ms
@@ -7089,13 +7091,13 @@ static MP_THREAD_VOID thumb_thread(void *p) {
         }
         if (ctx->req_pts == MP_NOPTS_VALUE) continue; // should only happen during shutdown
         struct mp_image *img = thumb_get_image(mpctx->demuxer);
-        if (img) {
+        if (img)
             overlay_thumb(mpctx, img);
-        }
+        else
+            MP_DBG(mpctx, "Failed to get thumbnail image at %f\n", ctx->req_pts);
+
         ctx->last_update = mp_time_ns();
         ctx->new_thumb = ctx->new_request = false;
-        MP_WARN(mpctx, "Timeout: %f\n", MP_TIME_NS_TO_MS(mp_time_ns() - ctx->last_update));
-
     }
     mp_mutex_unlock(&ctx->lock);
     MP_THREAD_RETURN();
@@ -7147,7 +7149,7 @@ static void cmd_thumb(void *p) {
         ctx->new_request = true;
         mp_cond_signal(&ctx->cond);
     }
-    MP_INFO(mpctx, "Thumbnail at %f\n", ctx->req_pts);
+    MP_DBG(mpctx, "Thumbnail at %f\n", ctx->req_pts);
     mp_mutex_unlock(&ctx->lock);
 }
 

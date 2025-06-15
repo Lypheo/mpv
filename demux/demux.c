@@ -4713,7 +4713,7 @@ static bool get_demux_sub_opts(int index, const struct m_sub_options **sub)
 
 struct mp_codec_params* thumb_get_codec_params(struct demuxer *demuxer) {
     struct demux_internal *in = demuxer->in;
-    struct mp_codec_params* cp;
+    struct mp_codec_params* cp = NULL;
     mp_mutex_lock(&in->lock);
     for (int n = 0; n < in->num_streams; n++) {
         struct demux_stream *ds = in->streams[n]->ds;
@@ -4732,7 +4732,7 @@ void thumb_get_start(struct demuxer *demuxer, double pts, struct demux_packet **
         MP_INFO(in, "Requested frame not in cache!\n");
         return;
     }
-    struct demux_packet *dp;
+    struct demux_packet *dp = NULL;
     for (int n = 0; n < in->num_streams; n++) {
         struct demux_stream *ds = in->streams[n]->ds;
         if (ds->type == STREAM_VIDEO && ds->selected) {
@@ -4890,6 +4890,7 @@ static MP_THREAD_VOID thumb_worker_thread(void *p) {
     mp_mutex_unlock(&in->lock);
 
 error:
+    MP_WARN(demuxer, "Thumbnail worker thread exiting due to error.\n");
     // TODO: implement restart mechanism
     mp_mutex_lock(&thumb->lock);
     thumb->running = false;
