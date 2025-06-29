@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="network" type="CLionNativeAppRunConfigurationType" PROGRAM_PARAMS="&quot;X:\files\anime\temp\[Erai-raws] Katainaka no Ossan Kensei ni Naru - 01 [1080p AMZN WEB-DL AVC EAC3][MultiSub][B952D09C].mkv&quot; --quiet --msg-level=all=status" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="mpv" TARGET_NAME="all" CONFIG_NAME="Default" version="1" RUN_PATH="$PROJECT_DIR$/buildDir/mpv.exe">
+    <envs>
+      <env name="CFLAGS" value="-O0" />
+    </envs>
+    <method v="2">
+      <option name="CLION.COMPOUND.BUILD" enabled="true" />
+    </method>
+  </configuration>
+</component>
