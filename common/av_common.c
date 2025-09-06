@@ -420,4 +420,5 @@ void mp_codec_info_from_av(const AVCodecContext *avctx, struct mp_codec_params *
     c->codec_desc = avctx->codec_descriptor->long_name;
     c->decoder = avctx->codec->name;
     c->decoder_desc = avctx->codec->long_name;
+    c->id = avctx->codec_id;
 }

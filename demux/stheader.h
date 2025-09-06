@@ -24,6 +24,7 @@
 #include "common/common.h"
 #include "audio/chmap.h"
 #include "video/mp_image.h"
+#include <libavcodec/avcodec.h>
 
 struct MPOpts;
 struct demuxer;
@@ -72,6 +73,8 @@ struct mp_codec_params {
 
     // E.g. "h264" (usually corresponds to AVCodecDescriptor.name)
     const char *_Atomic codec;
+
+    enum AVCodecID id;
 
     // Usually corresponds to AVCodecDescriptor.long_name
     const char *_Atomic codec_desc;

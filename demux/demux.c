@@ -4779,7 +4779,7 @@ static void init_decoder(struct demuxer *demuxer, struct mp_codec_params** cp) {
     *cp = new_cp;
     thumb->tb = mp_get_codec_timebase(*cp);
 
-    const AVCodec* codec = avcodec_find_decoder_by_name((*cp)->codec);
+    const AVCodec* codec = avcodec_find_decoder((*cp)->id);
     if (!codec) {
         MP_WARN(demuxer, "Error finding thumbnail decoder\n");
         return;

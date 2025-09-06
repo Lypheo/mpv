@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="local cache" type="CLionNativeAppRunConfigurationType" PROGRAM_PARAMS="&quot;E:\Anime\Grisaia_01.mkv&quot; --quiet --msg-level=all=status --cache --geometry=1280x720" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="mpv" TARGET_NAME="all" CONFIG_NAME="Default" version="1" RUN_PATH="$PROJECT_DIR$/buildDir/mpv.exe">
+  <configuration default="false" name="local cache" type="CLionNativeAppRunConfigurationType" PROGRAM_PARAMS="&quot;F:\media\clips\obs\Replay 2025-09-01 22-46-51.mkv&quot; --quiet --msg-level=all=status --cache --geometry=1280x720" REDIRECT_INPUT="false" ELEVATE="false" USE_EXTERNAL_CONSOLE="false" EMULATE_TERMINAL="false" PASS_PARENT_ENVS_2="true" PROJECT_NAME="mpv" TARGET_NAME="all" CONFIG_NAME="Default" version="1" RUN_PATH="$PROJECT_DIR$/buildDir/mpv.exe">
     <method v="2">
       <option name="CLION.COMPOUND.BUILD" enabled="true" />
     </method>
