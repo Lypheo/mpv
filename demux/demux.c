@@ -4837,10 +4837,13 @@ static MP_THREAD_VOID thumb_worker_thread(void *p) {
                 mp_set_av_packet(pkt, demux_copy_packet(NULL, cur_pkt), &thumb->tb);
                 ret = avcodec_send_packet(thumb->decoder_ctx, pkt);
                 av_packet_free(&pkt);
-        
+
                 if (ret < 0) {
                     MP_WARN(demuxer, "Error sending a packet for decoding: %s\n", av_err2str(ret));
-                    goto error;
+                    mp_mutex_lock(&thumb->lock);
+                    thumb->done = true;
+                    mp_mutex_unlock(&thumb->lock);
+                    goto done;
                 }
                 cur_pkt = cur_pkt->next && !cur_pkt->next->keyframe ? cur_pkt->next : NULL;
             } else {
@@ -4879,17 +4882,20 @@ static MP_THREAD_VOID thumb_worker_thread(void *p) {
             }
             if (ret != AVERROR(EAGAIN)) {
                 MP_WARN(demuxer, "Error during decoding: %s\n", av_err2str(ret));
-                goto error;
+                mp_mutex_lock(&thumb->lock);
+                thumb->done = true;
+                mp_mutex_unlock(&thumb->lock);
+                goto done;
             }
         }
+
     done: // break out of nested loop
         mp_mutex_lock(&thumb->lock);
         while (thumb->done)
             mp_cond_wait(&thumb->cond, &thumb->lock);
     }
-    mp_mutex_unlock(&in->lock);
 
-error:
+    mp_mutex_unlock(&in->lock);
     MP_WARN(demuxer, "Thumbnail worker thread exiting due to error.\n");
     // TODO: implement restart mechanism
     mp_mutex_lock(&thumb->lock);
