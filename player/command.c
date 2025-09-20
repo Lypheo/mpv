@@ -7123,7 +7123,6 @@ static void thumb_init(struct MPContext *mpctx) {
     ctx->thumb.req_pts = MP_NOPTS_VALUE;
     ctx->thumb.last_update = INFINITY;
     mp_thread_create(&ctx->thumb.thread, thumb_thread, mpctx);
-    thumb_start_worker(mpctx->demuxer, thumb_wakeup_cb, mpctx);
 }
 
 static void cmd_thumb(void *p) {
@@ -7145,7 +7144,7 @@ static void cmd_thumb(void *p) {
         ctx->x = cmd->args[2].v.i, ctx->y = cmd->args[3].v.i;
         ctx->w = cmd->args[4].v.i, ctx->h = cmd->args[5].v.i;
         overlay_thumb(mpctx, NULL);
-        thumb_seek(mpctx->demuxer, ctx->req_pts);
+        thumb_seek(mpctx->demuxer, ctx->req_pts, thumb_wakeup_cb, mpctx);
         ctx->new_request = true;
         mp_cond_signal(&ctx->cond);
     }
@@ -7697,7 +7696,6 @@ void command_uninit(struct MPContext *mpctx)
         mp_cond_signal(&ctx->thumb.cond);
         mp_mutex_unlock(&ctx->thumb.lock);
         mp_thread_join(ctx->thumb.thread);
-        thumb_stop_worker(mpctx->demuxer);
     }
     mp_mutex_destroy(&ctx->thumb.lock);
     mp_cond_destroy(&ctx->thumb.cond);

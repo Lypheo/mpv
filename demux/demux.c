@@ -1091,6 +1091,9 @@ static void demux_shutdown(struct demux_internal *in)
 {
     struct demuxer *demuxer = in->d_user;
 
+    if (in->thumb.worker_thread)
+        thumb_stop_worker(demuxer);
+
     if (in->recorder) {
         mp_recorder_destroy(in->recorder);
         in->recorder = NULL;
@@ -3525,6 +3528,8 @@ struct demuxer *demux_open_url(const char *url,
     if (d) {
         talloc_steal(d->in, priv_cancel);
         mp_assert(d->cancel);
+
+        thumb_start_worker(d);
     } else {
         params->demuxer_failed = true;
         if (!params->external_stream)
@@ -4895,14 +4900,11 @@ static MP_THREAD_VOID thumb_worker_thread(void *p) {
             mp_cond_wait(&thumb->cond, &thumb->lock);
     }
 
-    mp_mutex_unlock(&in->lock);
     MP_WARN(demuxer, "Thumbnail worker thread exiting due to error.\n");
-    // TODO: implement restart mechanism
-    mp_mutex_lock(&thumb->lock);
     thumb->running = false;
-    mp_mutex_unlock(&thumb->lock);
     if (thumb->decoder_ctx)
         avcodec_free_context(&thumb->decoder_ctx);
+    mp_mutex_unlock(&thumb->lock);
     MP_THREAD_RETURN();
 }
 
@@ -4933,17 +4935,19 @@ struct mp_image* thumb_get_image(struct demuxer *demuxer) {
     return img;
 }
 
-void thumb_seek(struct demuxer *demuxer, double pts) {
+void thumb_seek(struct demuxer *demuxer, double pts, void (*wakeup_cb)(void *ctx), void *ctx) {
     struct demux_internal *in = demuxer->in;
     struct thumb *thumb = &in->thumb;
     mp_mutex_lock(&thumb->lock);
     thumb->req_pts = pts;
     thumb->done = false;
+    thumb->wakeup_cb = wakeup_cb;
+    thumb->wakeup_cb_ctx = ctx;
     mp_mutex_unlock(&thumb->lock);
     mp_cond_signal(&thumb->cond);
 }
 
-void thumb_start_worker(struct demuxer *demuxer, void (*wakeup_cb)(void *ctx), void *ctx) {
+void thumb_start_worker(struct demuxer *demuxer) {
     struct demux_internal *in = demuxer->in;
     struct thumb *thumb = &in->thumb;
     *thumb = (struct thumb){0};
@@ -4954,17 +4958,19 @@ void thumb_start_worker(struct demuxer *demuxer, void (*wakeup_cb)(void *ctx), v
     thumb->done = true;
     thumb->req_pts = MP_NOPTS_VALUE;
     thumb->last_thumb_pts = MP_NOPTS_VALUE;
-    thumb->wakeup_cb = wakeup_cb;
-    thumb->wakeup_cb_ctx = ctx;
     mp_thread_create(&thumb->worker_thread, thumb_worker_thread, demuxer);
 }
 void thumb_stop_worker(struct demuxer *demuxer) {
     struct demux_internal *in = demuxer->in;
     struct thumb *thumb = &in->thumb;
     mp_mutex_lock(&thumb->lock);
+    thumb->done = false;
     thumb->running = false;
     mp_mutex_unlock(&thumb->lock);
     mp_cond_signal(&thumb->cond);
-    mp_thread_join(&thumb->worker_thread);
+    mp_thread_join(thumb->worker_thread);
+
     av_frame_free(&thumb->frame);
+    mp_mutex_destroy(&thumb->lock);
+    mp_cond_destroy(&thumb->cond);
 }
